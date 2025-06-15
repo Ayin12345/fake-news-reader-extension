@@ -1,4 +1,6 @@
-export default {
+import { defineContentScript } from '#imports';
+
+export default defineContentScript({
   matches: ['<all_urls>'],
   main() {
     // Content script - runs on web pages
@@ -123,4 +125,4 @@ export default {
       }
     });
   }
-};
+});

@@ -4,8 +4,9 @@ import { fetchCohere } from '../utils/aiHandling'
 import { fetchMistral7B } from '../utils/aiHandling'
 import { fetchMixtral8x7B } from '../utils/aiHandling'
 import { fetchLlama } from '../utils/aiHandling'
+import { defineBackground } from '#imports'
 
-export default {
+export default defineBackground({
   main() {
     // Example: Listen for extension installation
     chrome.runtime.onInstalled.addListener(() => {
@@ -83,4 +84,4 @@ export default {
       } 
     })
   }
-};
+});

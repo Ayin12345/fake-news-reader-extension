@@ -13,5 +13,5 @@
     "strict": true,
     "types": ["chrome", "vite/client"]
   },
-  "include": ["entrypoints", "utils"]
+  "include": ["entrypoints", "utils", "src"]
 } 

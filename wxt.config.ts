@@ -2,6 +2,7 @@ import { defineConfig } from 'wxt';
 
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
+  srcDir: 'src',
   manifest: {
     name: "Fake News Reader",
     version: "1.0.0",

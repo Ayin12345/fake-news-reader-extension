@@ -56,15 +56,6 @@ function App() {
       }
     });
   }
-  /*
-  Mixtral 8x7B: 
-  > "Please review the following article for credibility. Give a credibility score from 1 to 10, explain your reasoning, 
-   and list a few reputable sources or articles that support or contradict the main points.
-    Article: [PASTE ARTICLE HERE]"
-  Mistral 7B:
-  > "Please review the following article for credibility. Give a credibility score from 1 to 10, explain your reasoning, 
-  */
- //REFACTOR TYPESCRIPT CODE
 
   return (
     <div>
