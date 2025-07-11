@@ -7,7 +7,8 @@ export default defineConfig({
     permissions: [
       "storage",
       "scripting",
-      "activeTab"
+      "activeTab",
+      "tabs"
     ]
   }
 }); 

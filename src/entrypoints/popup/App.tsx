@@ -249,6 +249,32 @@ function App() {
     return analysis.find(result => result.provider === selectedProvider);
   }
 
+  // Add function to handle link clicks
+  const handleLinkClick = async (e: React.MouseEvent<HTMLAnchorElement>, link: string) => {
+    e.preventDefault();
+    
+    try {
+      // Save current state before opening link
+      await chrome.runtime.sendMessage({ 
+        type: 'SAVE_TAB_STATE', 
+        data: {
+          pageInfo,
+          analysis,
+          failedProviders,
+          showButton,
+          selectedProvider
+        }
+      });
+
+      // Open link in new tab
+      await chrome.tabs.create({ url: link, active: true });
+    } catch (error) {
+      console.error('Error handling link click:', error);
+      // If chrome.tabs.create fails, fall back to window.open
+      window.open(link, '_blank');
+    }
+  };
+
   return (
     <div>
       <h1>My Chrome Extension</h1>
@@ -363,7 +389,20 @@ function App() {
                     <ul style={{ marginTop: '10px' }}>
                       {getSelectedAnalysis()?.result.supporting_links.map((link, linkIdx) => (
                         <li key={linkIdx}>
-                          <a href={link} target="_blank" rel="noopener noreferrer">{link}</a>
+                          <a 
+                            href="#"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              window.open(link, '_blank');
+                            }}
+                            style={{ 
+                              cursor: 'pointer',
+                              color: '#0066cc',
+                              textDecoration: 'underline'
+                            }}
+                          >
+                            {link}
+                          </a>
                         </li>
                       ))}
                     </ul>
