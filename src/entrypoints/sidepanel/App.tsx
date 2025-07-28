@@ -15,7 +15,6 @@ function App() {
   interface AnalysisResult {
     provider: string,
     result: {
-      topic: string;
       credibility_score: number;
       credibility_summary: string;
       reasoning: string;
@@ -29,25 +28,96 @@ function App() {
 
   // Add loading state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // Start with false since we need user action
   const [error, setError] = useState('');
   const [pageInfo, setPageInfo] = useState<PageInfo | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResult[]>([]);
   const [failedProviders, setFailedProviders] = useState<string[]>([]);
   const [showButton, setShowButton] = useState(true);
   const [selectedProvider, setSelectedProvider] = useState<string>('');
+  const [hasAttemptedAnalysis, setHasAttemptedAnalysis] = useState(false); // Track if user has tried to analyze
 
-  // Load saved state when popup opens
+  // Load saved state when popup opens and handle tab switches
   useEffect(() => {
-    chrome.runtime.sendMessage({ type: 'GET_TAB_STATE' }, (response) => {
-      if (response?.success && response.data) {
-        const state = response.data;
-        if (state.pageInfo) setPageInfo(state.pageInfo);
-        if (state.analysis) setAnalysis(state.analysis);
-        if (state.failedProviders) setFailedProviders(state.failedProviders);
-        if (typeof state.showButton === 'boolean') setShowButton(state.showButton);
+    const loadTabState = () => {
+      chrome.runtime.sendMessage({ type: 'GET_TAB_STATE' }, (response) => {
+        if (response?.success && response.data) {
+          const state = response.data;
+          if (state.pageInfo) setPageInfo(state.pageInfo);
+          if (state.analysis) setAnalysis(state.analysis);
+          if (state.failedProviders) setFailedProviders(state.failedProviders);
+          if (typeof state.showButton === 'boolean') setShowButton(state.showButton);
+          // Mark as attempted if we have analysis results OR page info (user has started the process)
+          if ((state.analysis && state.analysis.length > 0) || state.pageInfo) {
+            setHasAttemptedAnalysis(true);
+          }
+        }
+      });
+    };
+
+    // Load initial state
+    loadTabState();
+
+    // Listen for tab switch messages from background script
+    const handleTabSwitch = (message: any) => {
+      if (message.type === 'TAB_SWITCHED') {
+        console.log('Tab switched, updating state:', message.state);
+        
+        // Update state based on the new tab's state
+        const state = message.state;
+        
+        // Clear current state first
+        setError('');
+        setPageInfo(null);
+        setAnalysis([]);
+        setFailedProviders([]);
+        setShowButton(true);
+        setHasAttemptedAnalysis(false);
+        setIsLoading(false);
+        setIsAnalyzing(false); // Reset analyzing state when switching tabs
+        
+        // Set new state if it exists
+        if (state) {
+          if (state.pageInfo) setPageInfo(state.pageInfo);
+          if (state.analysis) {
+            console.log('Restoring analysis state:', state.analysis);
+            console.log('Analysis length:', state.analysis.length);
+            state.analysis.forEach((result: any, idx: number) => {
+              console.log(`Analysis ${idx}:`, result.provider, result.result.credibility_summary);
+            });
+            setAnalysis(state.analysis);
+          }
+          if (state.failedProviders) setFailedProviders(state.failedProviders);
+          if (typeof state.showButton === 'boolean') setShowButton(state.showButton);
+          if (typeof state.isAnalyzing === 'boolean') setIsAnalyzing(state.isAnalyzing);
+          
+          // Determine if user has attempted analysis for this tab
+          if ((state.analysis && state.analysis.length > 0) || state.pageInfo) {
+            setHasAttemptedAnalysis(true);
+          }
+        }
+        // If no state exists, the sidebar will show the starter screen (default behavior)
       }
-    });
+    };
+
+    // Add message listener
+    chrome.runtime.onMessage.addListener(handleTabSwitch);
+
+    // Cleanup listener on unmount
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleTabSwitch);
+    };
   }, []);
+
+  const resetState = () => {
+    setError('');
+    setPageInfo(null);
+    setAnalysis([]);
+    setFailedProviders([]);
+    setShowButton(true);
+    setHasAttemptedAnalysis(false);
+    setIsLoading(false);
+  };
 
   const getPageInfo = () => {
     // Reset state
@@ -56,6 +126,8 @@ function App() {
     setAnalysis([]);
     setFailedProviders([]);
     setShowButton(true);
+    setIsLoading(true); // Start loading when manually refreshing
+    setHasAttemptedAnalysis(true); // Mark that user has attempted analysis
 
     // Reset background state
     chrome.runtime.sendMessage({ type: 'RESET_TAB_STATE' }, (response) => {
@@ -68,11 +140,13 @@ function App() {
       chrome.runtime.sendMessage({ type: 'GET_PAGE_INFO' }, (response) => {
         if (!response.success) {
           setError(response.error || 'Failed to get page info');
+          setIsLoading(false);
           return;
         }
         
         if (!response.data) {
           setError('No page data received');
+          setIsLoading(false);
           return;
         }
 
@@ -82,6 +156,7 @@ function App() {
           url: response.data.url || 'No URL found',
           wordCount: response.data.wordCount || 0
         });
+        setIsLoading(false);
       });
     });
   }
@@ -96,44 +171,42 @@ function App() {
     setAnalysis([])
     setFailedProviders([])
     setSelectedProvider('')
+    
     setIsAnalyzing(true)
     
     chrome.runtime.sendMessage({
       type: 'ANALYZE_ARTICLE',
       content: 
-      `Please analyze this article and provide the response in the following JSON structure:
+      `Analyze this news article for credibility and provide a structured response in JSON format:
+
         {
-          "topic": "brief 2-3 word description of the article's main topic",
           "credibility_score": (1-100),
-          "credibility_summary": "balanced summary showing both what makes the article credible and any credibility concerns",
-          "reasoning": "detailed explanation of the score",
+          "credibility_summary": "2-3 sentence balanced assessment showing both credibility strengths and concerns",
+          "reasoning": "detailed explanation of the credibility score with specific evidence and analysis",
           "evidence_sentences": [
             {
-              "quote": "direct quote from the article",
-              "impact": "explanation of how this quote increases credibility"
-            },
-            ...
+              "quote": "exact quote from the article",
+              "impact": "how this specific quote supports or undermines credibility"
+            }
           ],
           "supporting_links": []
         }
 
-        Source URL: ${pageInfo.url}
-        
-        Article to analyze (from source): 
-        """
-        ${pageInfo.content}
-        """
+        ARTICLE TO ANALYZE:
+        URL: ${pageInfo.url}
+        TITLE: ${pageInfo.title}
+        CONTENT: ${pageInfo.content}
 
-        Instructions:
-        1. Use the source URL to verify the publisher's credibility
-        2. Cross-reference the content with other news sources
-        3. For topic, keep it concise and focused on the main specific subject (not broad)
-        4. Verify specific quotes and claims from the text
-        5. For evidence_sentences, extract up to 3 direct quotes from the article that support your analysis and explain how each increases credibility
-        6. For credibility_summary, provide a 1-2 brief sentence balanced view showing both strengths and potential credibility concerns
-        7. Leave supporting_links empty - they will be added separately
+        ANALYSIS REQUIREMENTS:
+        1. credibility_score: Must be a number between 1-100
+        2. credibility_summary: Must be 2 sentences showing both strengths and concerns
+        3. reasoning: Must be detailed explanation with specific evidence
+        4. evidence_sentences: Must include at least 2-3 specific quotes from the article
+        5. supporting_links: Must be empty array []
+        
+        IMPORTANT: All fields are required. Do not skip any field. Provide specific, detailed responses.
         `,
-      providers: ['Cohere', 'Gemini', "Llama", "Mistral7B", "Mixtral8x7B"] //FIX HUGGINGFACE API KEY`
+        providers: ['Cohere', 'Gemini', "Llama", "Mistral7B", "Mixtral8x7B"] //FIX HUGGINGFACE API KEY`
       //verification sources bugging out
     }, async (response) => {
       console.log('Raw API Response:', response);
@@ -176,9 +249,8 @@ function App() {
                     parsedResult = JSON.parse(r.value);
                   } catch (e) {
                     const scoreMatch = r.value.match(/credibility_score["\s:]+(\d+)/);
-                    const reasoningMatch = r.value.match(/reasoning["\s:]+(.+?)(?=supporting_links|deduction_explanation|evidence_sentences|$)/s);
-                    const linksMatch = r.value.match(/supporting_links["\s:]+\[(.*?)\]/s);
-                    const deductionMatch = r.value.match(/deduction_explanation["\s:]+(.+?)(?=reasoning|supporting_links|evidence_sentences|$)/s);
+                    const summaryMatch = r.value.match(/credibility_summary["\s:]+(.+?)(?=reasoning|supporting_links|evidence_sentences|$)/s);
+                    const reasoningMatch = r.value.match(/reasoning["\s:]+(.+?)(?=supporting_links|evidence_sentences|$)/s);
                     const evidenceMatch = r.value.match(/evidence_sentences["\s:]+\[(.*?)\]/s);
                     
                     // Parse evidence sentences with their impact
@@ -208,13 +280,10 @@ function App() {
                     
                     parsedResult = {
                       credibility_score: scoreMatch ? parseInt(scoreMatch[1]) : 0,
-                      deduction_explanation: deductionMatch ? deductionMatch[1].trim().replace(/['"]+/g, '') : 'No explanation provided',
-                      reasoning: reasoningMatch ? reasoningMatch[1].trim().replace(/['"]+/g, '') : r.value,
+                      credibility_summary: summaryMatch ? summaryMatch[1].trim().replace(/['"]+/g, '').replace(/[.,]+$/, '') : 'No summary provided',
+                      reasoning: reasoningMatch ? reasoningMatch[1].trim().replace(/['"]+/g, '').replace(/[.,]+$/, '') : r.value,
                       evidence_sentences: evidenceSentences,
-                      supporting_links: linksMatch ? 
-                        linksMatch[1].split(',')
-                          .map((link: string) => link.trim().replace(/['"]+/g, ''))
-                          .filter((link: string) => link.length > 0) : []
+                      supporting_links: [] // Always start with empty array, will be filled by web search
                     };
                   }
                 } else {
@@ -226,11 +295,25 @@ function App() {
                   return null;
                 }
 
-                // Validate the result structure
-                if (typeof parsedResult.credibility_score !== 'number' || 
+                // Ensure all required fields exist with fallbacks
+                if (typeof parsedResult.credibility_score !== 'number') {
+                  console.error('Missing credibility_score:', parsedResult);
+                  return null;
+                }
+                
+                // Add missing fields with defaults
+                parsedResult.credibility_summary = parsedResult.credibility_summary || 'No summary provided';
+                parsedResult.reasoning = parsedResult.reasoning || 'No reasoning provided';
+                parsedResult.evidence_sentences = parsedResult.evidence_sentences || [];
+                parsedResult.supporting_links = parsedResult.supporting_links || [];
+                
+                // Validate remaining structure
+                if (typeof parsedResult.credibility_summary !== 'string' ||
                     typeof parsedResult.reasoning !== 'string' ||
+                    !Array.isArray(parsedResult.evidence_sentences) ||
                     !Array.isArray(parsedResult.supporting_links)) {
-                  console.error('Invalid result structure:', parsedResult);
+                  console.error('Invalid result structure after fallbacks:', parsedResult);
+                  setError('Failed to parse analysis results. Please try again.');
                   return null;
                 }
 
@@ -248,20 +331,34 @@ function App() {
         const validResults = successfulResults.filter((x): x is NonNullable<typeof x> => x !== null);
         
         if (validResults.length > 0) {
-          // Get the most common topic
-          const topicCounts = validResults.reduce((acc, curr) => {
-            const topic = curr.result.topic;
-            acc[topic] = (acc[topic] || 0) + 1;
-            return acc;
-          }, {} as Record<string, number>);
+          // Extract key terms from the title for broader search
+          const keyTerms = pageInfo.title
+            .replace(/[^\w\s]/g, ' ') // Remove punctuation
+            .split(' ')
+            .filter(word => word.length > 3) // Filter out short words
+            .slice(0, 6) // Take first 6 meaningful words
+            .join(' ');
           
-          const mainTopic = Object.entries(topicCounts)
-            .sort(([,a], [,b]) => (b as number) - (a as number))[0][0];
-
-          // Search for verification sources
+          const searchQuery = keyTerms;
+          
+          
+          // Search for verification sources with more specific query
+          const searchTimeout = setTimeout(() => {
+            console.log('Web search timed out, continuing with analysis');
+            // Add timeout message to supporting_links for display in UI
+            validResults.forEach(result => {
+              result.result.supporting_links = ['Web search timed out. Please verify this information independently.'];
+            });
+            
+            // Show analysis results even if web search times out
+            setAnalysis(validResults);
+            setShowButton(false);
+            setIsAnalyzing(false);
+          }, 10000); // 10 second timeout
+          
           chrome.runtime.sendMessage({ 
             type: 'WEB_SEARCH', 
-            query: `${mainTopic} news article fact check verify`,
+            query: searchQuery,
             max_results: 5
           }, (searchResponse: { 
             success: boolean; 
@@ -271,6 +368,9 @@ function App() {
               }> 
             } 
           }) => {
+            // Clear the timeout since we got a response
+            clearTimeout(searchTimeout);
+            
             const results = searchResponse?.data?.results;
             if (searchResponse?.success && results && results.length > 0) {
               // Add real URLs to all results
@@ -282,12 +382,35 @@ function App() {
               validResults.forEach(result => {
                 result.result.supporting_links = verificationUrls;
               });
+            } else {
+              console.log('Web search failed or returned no results, but continuing with analysis');
+              // Add error message to supporting_links for display in UI
+              validResults.forEach(result => {
+                result.result.supporting_links = ['No verification sources found. Please verify this information independently.'];
+              });
             }
             
+            // Always show analysis results, regardless of web search success
             setAnalysis(validResults);
             setShowButton(false);
             setIsAnalyzing(false);
           });
+          
+          // Handle case where chrome.runtime.sendMessage fails entirely
+          if (chrome.runtime.lastError) {
+            console.log('Chrome runtime error during web search, continuing with analysis');
+            clearTimeout(searchTimeout);
+            
+            // Add error message to supporting_links for display in UI
+            validResults.forEach(result => {
+              result.result.supporting_links = ['Web search failed due to technical issues. Please verify this information independently.'];
+            });
+            
+            // Show analysis results even if web search fails
+            setAnalysis(validResults);
+            setShowButton(false);
+            setIsAnalyzing(false);
+          }
         } else {
           setError('Failed to parse analysis results. Please try again.');
           setIsAnalyzing(false);
@@ -302,18 +425,38 @@ function App() {
     });
   }
 
+
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
         <h1 className={styles.title}>Fake News Reader</h1>
-        <button className={styles.button} onClick={getPageInfo}>
-          New Analysis
-        </button>
+        <div className={styles.headerButtons}>
+          <button 
+            className={`${styles.button} ${!hasAttemptedAnalysis ? styles.headerButtonHidden : ''}`} 
+            onClick={getPageInfo}
+          >
+            New Analysis
+          </button>
+          {hasAttemptedAnalysis && (
+            <button 
+              className={styles.resetButton} 
+              onClick={resetState}
+              title="Reset to welcome screen"
+            >
+              ↺
+            </button>
+          )}
+        </div>
       </div>
 
       <div className={styles.content}>
         {error && <p className={styles.error}>{error}</p>}
-        {pageInfo && (
+        {isLoading ? (
+          <div className={styles.loadingState}>
+            <div className={styles.spinner}></div>
+          </div>
+        ) : pageInfo ? (
           <>
             <h2 className={styles.pageTitle}>
               {pageInfo.title || 'No title found'}
@@ -321,14 +464,22 @@ function App() {
             
             {(showButton || isAnalyzing) ? (
               <>
-                <PageDetails pageInfo={pageInfo} />
+                {isAnalyzing ? (
+                  <div className={styles.loadingState}>
+                    <div className={styles.spinner}></div>
+                  </div>
+                ) : (
+                  <PageDetails pageInfo={pageInfo} />
+                )}
+                {/* TODO: work on isAnalyzing loading state styling */}
                 <button 
                   className={styles.analyzeButton} 
                   onClick={analyzeArticle}
-                  disabled={isAnalyzing}
+                  hidden={isAnalyzing}
                 >
                   {isAnalyzing ? 'Analyzing...' : 'Analyze Article'}
                 </button>
+                
               </>
             ) : (
               analysis.length > 0 && (
@@ -342,6 +493,37 @@ function App() {
             
             <FailedProviders providers={failedProviders} />
           </>
+        ) : hasAttemptedAnalysis ? (
+          <div className={styles.loadingState}>
+            <p>No article detected on this page.</p>
+            <p>Please navigate to a news article and click "New Analysis" to begin.</p>
+            <button className={styles.button} onClick={getPageInfo}>
+              Try Again
+            </button>
+          </div>
+        ) : (
+          <div className={styles.starterScreen}>
+            <div className={styles.starterIcon}>LOGO</div> {/* TODO: Add logo */}
+            <h2>TITLE</h2> {/* TODO: Add title */}
+            <p>This web extension helps you analyze the credibility of news articles using multiple AI models; returning you a structured analysis of the article, including a credibility score, summary, reasoning, and evidence sentences. The extension also provides a list of supporting links to help you verify the information.</p>
+            <div className={styles.starterSteps}>
+              <div className={styles.step}>
+                <span className={styles.stepNumber}>1</span>
+                <span>Navigate to a news article</span>
+              </div>
+              <div className={styles.step}>
+                <span className={styles.stepNumber}>2</span>
+                <span>Click "New Analysis" to detect the article and its content</span>
+              </div>
+              <div className={styles.step}>
+                <span className={styles.stepNumber}>3</span>
+                <span>Click "Analyze Article" to get AI insights</span>
+              </div>
+            </div>
+            <button className={styles.button} onClick={getPageInfo}>
+              Start Analysis
+            </button>
+          </div>
         )}
       </div>
     </div>

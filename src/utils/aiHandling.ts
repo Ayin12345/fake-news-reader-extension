@@ -101,28 +101,47 @@ export async function fetchLlama(content: string, apiKey: string) {
 
 //add gemini in later, need to be 18+ 
 export async function fetchCohere(content: string, apiKey: string) {
-    const response = await fetch('https://api.cohere.ai/v1/generate', {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ 
-            model: 'command',
-            prompt: content,
-            max_tokens: 1250,
-         })
-    });
+    console.log('Cohere API Key:', apiKey ? 'Present' : 'Missing');
+    console.log('Cohere API Key length:', apiKey.length);
     
-    if (!response.ok) {
-        throw new Error(`Cohere API error: ${response.status} ${response.statusText}`);
-    }
-    
-    const data = await response.json();
-    if (data.generations && data.generations[0] && data.generations[0].text) {
-        return data.generations[0].text;
-    } else {
-        throw new Error(data.message || 'No response from Cohere');
+    try {
+        const response = await fetch('https://api.cohere.ai/v1/generate', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ 
+                model: 'command',
+                prompt: content,
+                max_tokens: 1250,
+             })
+        });
+
+        console.log('Cohere Response Status:', response.status, response.statusText);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Cohere API Full Error:', {
+                status: response.status,
+                statusText: response.statusText,
+                errorText: errorText,
+                headers: Object.fromEntries(response.headers.entries())
+            });
+            throw new Error(`Cohere API error: ${response.status} ${response.statusText} - ${errorText}`);
+        }
+        
+        const data = await response.json();
+        console.log('Cohere API Response Data:', data);
+
+        if (data.generations && data.generations[0] && data.generations[0].text) {
+            return data.generations[0].text;
+        } else {
+            throw new Error(data.message || 'No response from Cohere');
+        }
+    } catch (error) {
+        console.error('Cohere API Call Failed:', error);
+        throw error;
     }
 }
 

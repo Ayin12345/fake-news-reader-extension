@@ -4,7 +4,6 @@ import styles from '../styles/AnalysisResults.module.css';
 interface AnalysisResult {
   provider: string;
   result: {
-    topic: string;
     credibility_score: number;
     credibility_summary: string;
     reasoning: string;
@@ -42,17 +41,20 @@ const getAllEvidence = (results: AnalysisResult[]) => {
   const evidenceMap = new Map<string, { impact: string; providers: string[] }>();
   
   results.forEach(result => {
-    result.result.evidence_sentences.forEach(evidence => {
-      const existing = evidenceMap.get(evidence.quote);
-      if (existing) {
-        existing.providers.push(result.provider);
-      } else {
-        evidenceMap.set(evidence.quote, {
-          impact: evidence.impact,
-          providers: [result.provider]
-        });
-      }
-    });
+    // Add null check for evidence_sentences
+    if (result.result.evidence_sentences && Array.isArray(result.result.evidence_sentences)) {
+      result.result.evidence_sentences.forEach(evidence => {
+        const existing = evidenceMap.get(evidence.quote);
+        if (existing) {
+          existing.providers.push(result.provider);
+        } else {
+          evidenceMap.set(evidence.quote, {
+            impact: evidence.impact,
+            providers: [result.provider]
+          });
+        }
+      });
+    }
   });
 
   // Convert to array and sort by number of providers citing it
@@ -69,7 +71,10 @@ const getAllEvidence = (results: AnalysisResult[]) => {
 const getAllLinks = (results: AnalysisResult[]): string[] => {
   const uniqueLinks = new Set<string>();
   results.forEach(result => {
-    result.result.supporting_links.forEach(link => uniqueLinks.add(link));
+    // Add null check for supporting_links
+    if (result.result.supporting_links && Array.isArray(result.result.supporting_links)) {
+      result.result.supporting_links.forEach(link => uniqueLinks.add(link));
+    }
   });
   return Array.from(uniqueLinks);
 };
@@ -99,34 +104,28 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
 }) => {
   const [showDetails, setShowDetails] = useState(false);
   const [showAllEvidence, setShowAllEvidence] = useState(false);
+  
+  // Add safety check for analysis array
+  if (!analysis || !Array.isArray(analysis) || analysis.length === 0) {
+    return (
+      <div className={styles.container}>
+        <div className={styles.errorState}>
+          <p>No analysis results available.</p>
+        </div>
+      </div>
+    );
+  }
+  
   const averageScore = calculateAverageScore(analysis);
   const scoreRange = getScoreRange(analysis);
   const allEvidence = getAllEvidence(analysis);
   const allLinks = getAllLinks(analysis);
   const scoreCategory = getScoreCategory(averageScore);
   
-  // Get the most common topic across all AIs
-  const getTopic = () => {
-    const topicCount = analysis.reduce((acc, curr) => {
-      const topic = curr.result.topic;
-      acc[topic] = (acc[topic] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    return Object.entries(topicCount)
-      .sort(([,a], [,b]) => b - a)[0][0];
-  };
-
   const displayedEvidence = showAllEvidence ? allEvidence : allEvidence.slice(0, 3);
 
   return (
     <div className={styles.container}>
-      {/* Topic Section */}
-      {/* maybe remove this section */}
-      <div className={styles.section}>
-        <h3>Article Topic</h3>                 
-        <div className={styles.topicContent}>{getTopic()}</div>
-      </div>
 
       {/* Main Score Section */}
       <div className={`${styles.scoreContainer} ${scoreCategory.class}`}>
@@ -148,7 +147,11 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
         <div className={styles.summaries}>
           {analysis.map((result, idx) => (
             <p key={idx} className={styles.summary}>
-              <span className={styles.aiTag}>{result.provider}:</span> {result.result.credibility_summary}
+              <span className={styles.aiTag}>{result.provider}:</span> 
+              {result.result.credibility_summary && result.result.credibility_summary.trim() ? 
+                result.result.credibility_summary : 
+                <span style={{fontStyle: 'italic', color: '#666'}}>No summary available</span>
+              }
             </p>
           ))}
         </div>
@@ -181,20 +184,26 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
       {/* Supporting Links */}
       {allLinks.length > 0 && (
         <div className={styles.section}>
-          <h3>Verification Sources</h3>
+          <h3>Alternative Sources</h3>
           <ul className={styles.linkList}>
             {allLinks.map((link, idx) => (
               <li key={idx}>
-                <a 
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    window.open(link, '_blank');
-                  }}
-                  className={styles.link}
-                >
-                  {link}
-                </a>
+                {link.startsWith('http') ? (
+                  <a 
+                    href="#"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      window.open(link, '_blank');
+                    }}
+                    className={styles.link}
+                  >
+                    {link}
+                  </a>
+                ) : (
+                  <span className={styles.errorMessage}>
+                    {link}
+                  </span>
+                )}
               </li>
             ))}
           </ul>

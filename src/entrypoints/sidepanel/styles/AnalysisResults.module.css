@@ -12,8 +12,9 @@
 }
 
 .scoreHigh {
-  background-color: #e6f4ea;
-  border-color: #137333;
+  background-color: #e8f5e8;
+  border-color: #2e7d32;
+  color: #2e7d32;
 }
 
 .scoreMedium {
@@ -27,8 +28,9 @@
 }
 
 .scoreLow {
-  background-color: #fce8e6;
-  border-color: #c5221f;
+  background-color: #ffebee;
+  border-color: #d32f2f;
+  color: #d32f2f;
 }
 
 .scoreHeader {
@@ -192,16 +194,37 @@ h3 {
 }
 
 .linkList li {
-  margin-bottom: 8px;
+  margin-bottom: 12px;
+  padding: 8px;
+  background-color: #f8f9fa;
+  border-radius: 4px;
+  border: 1px solid #e8eaed;
 }
 
 .link {
   color: #1a73e8;
   text-decoration: none;
+  word-break: break-all;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  display: block;
+  max-width: 100%;
+  line-height: 1.4;
 }
 
 .link:hover {
   text-decoration: underline;
+}
+
+.errorMessage {
+  color: #d93025;
+  font-style: italic;
+  word-break: break-all;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  display: block;
+  max-width: 100%;
+  line-height: 1.4;
 }
 
 .detailsToggle {
