@@ -28,7 +28,7 @@ function App() {
 
   // Add loading state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isLoading, setIsLoading] = useState(false); // Start with false since we need user action
+  const [isDetectingPage, setIsDetectingPage] = useState(false);
   const [error, setError] = useState('');
   const [pageInfo, setPageInfo] = useState<PageInfo | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResult[]>([]);
@@ -36,6 +36,8 @@ function App() {
   const [showButton, setShowButton] = useState(true);
   const [selectedProvider, setSelectedProvider] = useState<string>('');
   const [hasAttemptedAnalysis, setHasAttemptedAnalysis] = useState(false); // Track if user has tried to analyze
+  const [currentStep, setCurrentStep] = useState(0);
+  const [providerStatuses, setProviderStatuses] = useState<{[key: string]: 'waiting' | 'analyzing' | 'complete' | 'failed'}>({});
 
   // Load saved state when popup opens and handle tab switches
   useEffect(() => {
@@ -58,8 +60,8 @@ function App() {
     // Load initial state
     loadTabState();
 
-    // Listen for tab switch messages from background script
-    const handleTabSwitch = (message: any) => {
+    // Listen for messages from background script
+    const handleMessages = (message: any) => {
       if (message.type === 'TAB_SWITCHED') {
         console.log('Tab switched, updating state:', message.state);
         
@@ -73,8 +75,8 @@ function App() {
         setFailedProviders([]);
         setShowButton(true);
         setHasAttemptedAnalysis(false);
-        setIsLoading(false);
         setIsAnalyzing(false); // Reset analyzing state when switching tabs
+        setIsDetectingPage(false);
         
         // Set new state if it exists
         if (state) {
@@ -96,16 +98,25 @@ function App() {
             setHasAttemptedAnalysis(true);
           }
         }
-        // If no state exists, the sidebar will show the starter screen (default behavior)
+        
+      }
+      
+      // Handle real-time provider updates
+      if (message.type === 'PROVIDER_UPDATE') {
+        console.log(`Provider update: ${message.provider} -> ${message.status}`);
+        setProviderStatuses(prev => ({
+          ...prev,
+          [message.provider]: message.status
+        }));
       }
     };
 
     // Add message listener
-    chrome.runtime.onMessage.addListener(handleTabSwitch);
+    chrome.runtime.onMessage.addListener(handleMessages);
 
     // Cleanup listener on unmount
     return () => {
-      chrome.runtime.onMessage.removeListener(handleTabSwitch);
+      chrome.runtime.onMessage.removeListener(handleMessages);
     };
   }, []);
 
@@ -116,8 +127,36 @@ function App() {
     setFailedProviders([]);
     setShowButton(true);
     setHasAttemptedAnalysis(false);
-    setIsLoading(false);
+    setCurrentStep(0);
+    setProviderStatuses({});
+    setIsDetectingPage(false);
   };
+
+  // Typewriter effect steps
+  const analysisSteps = [
+    "Extracting article content...",
+    "Analyzing credibility patterns...",
+    "Cross-referencing sources...",
+    "Extracting supporting quotes...",
+    "Verifying information...",
+    "Querying AI providers...",
+    "Processing responses...",
+    "Generating insights...",
+    "Finalizing results..."
+  ];
+
+  // Cycle through analysis steps during loading
+  React.useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isAnalyzing) {
+      interval = setInterval(() => {
+        setCurrentStep((prev) => (prev + 1) % analysisSteps.length);
+      }, 2000); // Change step every 2 seconds
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isAnalyzing]);
 
   const getPageInfo = () => {
     // Reset state
@@ -126,8 +165,8 @@ function App() {
     setAnalysis([]);
     setFailedProviders([]);
     setShowButton(true);
-    setIsLoading(true); // Start loading when manually refreshing
     setHasAttemptedAnalysis(true); // Mark that user has attempted analysis
+    setIsDetectingPage(true); // Show detecting state
 
     // Reset background state
     chrome.runtime.sendMessage({ type: 'RESET_TAB_STATE' }, (response) => {
@@ -138,15 +177,15 @@ function App() {
 
       // Get new page info
       chrome.runtime.sendMessage({ type: 'GET_PAGE_INFO' }, (response) => {
+        setIsDetectingPage(false); // Hide detecting state
+        
         if (!response.success) {
           setError(response.error || 'Failed to get page info');
-          setIsLoading(false);
           return;
         }
         
         if (!response.data) {
           setError('No page data received');
-          setIsLoading(false);
           return;
         }
 
@@ -156,7 +195,6 @@ function App() {
           url: response.data.url || 'No URL found',
           wordCount: response.data.wordCount || 0
         });
-        setIsLoading(false);
       });
     });
   }
@@ -172,8 +210,24 @@ function App() {
     setFailedProviders([])
     setSelectedProvider('')
     
+    // Initialize provider statuses
+    let providers;
+    try {
+      providers = JSON.parse(import.meta.env.VITE_AI_ROUTERS || '["Cohere", "Gemini", "Llama", "Mistral7B", "Mixtral8x7B"]');
+    } catch (error) {
+      console.warn('Failed to parse VITE_AI_ROUTERS, using fallback:', error);
+      providers = ["Cohere", "Gemini", "Llama", "Mistral7B", "Mixtral8x7B"];
+    }
+    const initialStatuses: {[key: string]: 'waiting' | 'analyzing' | 'complete' | 'failed'} = {};
+    providers.forEach((provider: string) => {
+      initialStatuses[provider] = 'analyzing';
+    });
+    setProviderStatuses(initialStatuses);
+    
     setIsAnalyzing(true)
     
+
+
     chrome.runtime.sendMessage({
       type: 'ANALYZE_ARTICLE',
       content: 
@@ -206,7 +260,7 @@ function App() {
         
         IMPORTANT: All fields are required. Do not skip any field. Provide specific, detailed responses.
         `,
-        providers: ['Cohere', 'Gemini', "Llama", "Mistral7B", "Mixtral8x7B"] //FIX HUGGINGFACE API KEY`
+        providers: providers //FIX HUGGINGFACE API KEY`
       //verification sources bugging out
     }, async (response) => {
       console.log('Raw API Response:', response);
@@ -330,6 +384,28 @@ function App() {
 
         const validResults = successfulResults.filter((x): x is NonNullable<typeof x> => x !== null);
         
+        // Update provider statuses based on final results
+        console.log('Final results - Valid:', validResults.length, 'Failed:', failedProviders.length);
+        
+        // Update statuses based on final results
+        const finalStatuses: {[key: string]: 'waiting' | 'analyzing' | 'complete' | 'failed'} = {};
+        
+        // Mark all providers as failed initially
+        providers.forEach((provider: string) => {
+          finalStatuses[provider] = 'failed';
+        });
+        
+        // Mark successful providers as complete
+        validResults.forEach(result => {
+          if (result.provider) {
+            finalStatuses[result.provider] = 'complete';
+          }
+        });
+        
+        // Force immediate status update
+        console.log('Setting final statuses:', finalStatuses);
+        setProviderStatuses({...finalStatuses}); // Force new object reference
+
         if (validResults.length > 0) {
           // Extract key terms from the title for broader search
           const keyTerms = pageInfo.title
@@ -393,7 +469,11 @@ function App() {
             // Always show analysis results, regardless of web search success
             setAnalysis(validResults);
             setShowButton(false);
-            setIsAnalyzing(false);
+            
+            // Add a small delay before hiding the loading screen to ensure all provider statuses are visible
+            setTimeout(() => {
+              setIsAnalyzing(false);
+            }, 1500); // 1.5 second delay to show final provider statuses
           });
           
           // Handle case where chrome.runtime.sendMessage fails entirely
@@ -413,15 +493,18 @@ function App() {
           }
         } else {
           setError('Failed to parse analysis results. Please try again.');
-          setIsAnalyzing(false);
+          setTimeout(() => {
+            setIsAnalyzing(false);
+          }, 1500);
         }
       } catch (e) {
         console.error('Error processing analysis results:', e);
         setError('An error occurred while processing the results.');
-        setIsAnalyzing(false);
+        setTimeout(() => {
+          setIsAnalyzing(false);
+        }, 1500);
       }
       
-      setIsAnalyzing(false);
     });
   }
 
@@ -429,6 +512,39 @@ function App() {
 
   return (
     <div className={styles.container}>
+      {/* Modern Analysis Loading Overlay */}
+      {isAnalyzing && (
+        <div className={styles.analysisLoadingState}>
+          <div className={styles.analysisLoadingContent}>
+            <h2 className={styles.analysisLoadingTitle}>Analyzing Article</h2>
+            <p className={styles.analysisLoadingSubtitle}>
+              AI models are currently evaluating the credibility of this content
+            </p>
+            
+            <div className={styles.modernSpinner}>
+              <div className={styles.spinnerRing}></div>
+              <div className={styles.spinnerRing}></div>
+              <div className={styles.spinnerRing}></div>
+            </div>
+            
+            <div className={styles.typewriterContainer}>
+              <div className={styles.typewriterText}>
+                {analysisSteps[currentStep]}
+              </div>
+            </div>
+            
+            <div className={styles.aiProviders}>
+              {Object.entries(providerStatuses).map(([provider, status]) => (
+                <div key={`${provider}-${status}`} className={`${styles.providerStatus} ${status === 'complete' ? styles.complete : status === 'failed' ? styles.failed : ''}`}>
+                  <span className={styles.providerName}>{provider}</span>
+                  <div className={`${styles.statusDot} ${styles[`status${status.charAt(0).toUpperCase() + status.slice(1)}`]}`}></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      
       <div className={styles.header}>
         <h1 className={styles.title}>Fake News Reader</h1>
         <div className={styles.headerButtons}>
@@ -451,52 +567,39 @@ function App() {
       </div>
 
       <div className={styles.content}>
-        {error && <p className={styles.error}>{error}</p>}
-        {isLoading ? (
-          <div className={styles.loadingState}>
-            <div className={styles.spinner}></div>
-          </div>
-        ) : pageInfo ? (
+        {pageInfo ? (
           <>
             <h2 className={styles.pageTitle}>
               {pageInfo.title || 'No title found'}
             </h2>
             
-            {(showButton || isAnalyzing) ? (
-              <>
-                {isAnalyzing ? (
-                  <div className={styles.loadingState}>
-                    <div className={styles.spinner}></div>
-                  </div>
-                ) : (
-                  <PageDetails pageInfo={pageInfo} />
-                )}
-                {/* TODO: work on isAnalyzing loading state styling */}
-                <button 
-                  className={styles.analyzeButton} 
-                  onClick={analyzeArticle}
-                  hidden={isAnalyzing}
-                >
-                  {isAnalyzing ? 'Analyzing...' : 'Analyze Article'}
-                </button>
-                
-              </>
-            ) : (
-              analysis.length > 0 && (
-                <AnalysisResults 
-                  analysis={analysis}
-                  selectedProvider={selectedProvider}
-                  onProviderSelect={setSelectedProvider}
-                />
-              )
+            {/* Show PageDetails only when not analyzing AND no analysis results yet */}
+            {!isAnalyzing && analysis.length === 0 && <PageDetails pageInfo={pageInfo} />}
+            
+            {/* Show analysis results when available */}
+            {analysis.length > 0 && (
+              <AnalysisResults 
+                analysis={analysis}
+                selectedProvider={selectedProvider}
+                onProviderSelect={setSelectedProvider}
+              />
             )}
             
             <FailedProviders providers={failedProviders} />
           </>
-        ) : hasAttemptedAnalysis ? (
+        ) : isDetectingPage ? (
           <div className={styles.loadingState}>
-            <p>No article detected on this page.</p>
-            <p>Please navigate to a news article and click "New Analysis" to begin.</p>
+            <p>Detecting article content...</p>
+            <p>Please wait while we analyze this page.</p>
+          </div>
+        ) : hasAttemptedAnalysis ? (
+          <div className={styles.errorState}>
+            <div className={styles.errorMessage}>
+              {error || "Unable to analyze this page"}
+            </div>
+            <p className={styles.errorDescription}>
+              Click "New Analysis" above to try a different page, or "Try Again" to retry this page.
+            </p>
             <button className={styles.button} onClick={getPageInfo}>
               Try Again
             </button>
@@ -526,6 +629,18 @@ function App() {
           </div>
         )}
       </div>
+      
+      {/* Fixed Analyze Button - Only show when no analysis results yet */}
+      {pageInfo && !isAnalyzing && analysis.length === 0 && (
+        <div className={styles.fixedAnalyzeButton}>
+          <button 
+            className={styles.analyzeButton} 
+            onClick={analyzeArticle}
+          >
+            Analyze Article
+          </button>
+        </div>
+      )}
     </div>
   );
 }

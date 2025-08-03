@@ -66,6 +66,7 @@
 .content {
   flex: 1;
   padding: 20px;
+  padding-bottom: 80px; /* Account for fixed analyze button */
   overflow-y: auto;
   width: 100%;
 }
@@ -141,21 +142,271 @@
   margin-top: 20px;
 }
 
-.spinner {
-  width: 100px;
-  height: 100px;
-  border: 2px solid #e0e0e0;
-  border-top: 2px solid #1a73e8;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin: 20px auto;
-  padding-bottom: 20px;
+/* Error State Styling */
+.errorState {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 40px 20px;
+  color: #5f6368;
+  max-width: 320px;
+  margin: 0 auto;
+  min-height: 300px;
 }
 
-@keyframes spin {
+.errorIcon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.8;
+}
+
+.errorMessage {
+  font-size: 14px;
+  font-weight: 500;
+  color: #d93025;
+  margin-bottom: 12px;
+  line-height: 1.4;
+  background: #fce8e6;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border-left: 3px solid #d93025;
+}
+
+.errorDescription {
+  font-size: 14px;
+  color: #5f6368;
+  margin: 16px 0 24px 0;
+  line-height: 1.5;
+}
+
+.errorButtons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.secondaryButton {
+  padding: 8px 16px;
+  background-color: #f8f9fa;
+  color: #5f6368;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.secondaryButton:hover {
+  background-color: #e8eaed;
+  border-color: #c4c7c5;
+}
+
+/* Modern Analysis Loading State */
+.analysisLoadingState {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, #f8f9ff 0%, #e8f0fe 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 40px 20px;
+}
+
+.analysisLoadingContent {
+  text-align: center;
+  max-width: 280px;
+}
+
+.analysisLoadingTitle {
+  font-size: 30px;
+  font-weight: 600;
+  color: #1a73e8;
+  margin-bottom: 15px;
+  animation: fadeInUp 0.6s ease-out;
+}
+
+.analysisLoadingSubtitle {
+  font-size: 14px;
+  color: #5f6368;
+  margin-bottom: 32px;
+  animation: fadeInUp 0.6s ease-out 0.2s both;
+}
+
+.modernSpinner {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 24px;
+}
+
+.spinnerRing {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border: 3px solid transparent;
+  border-radius: 50%;
+  animation: modernSpin 2s linear infinite;
+}
+
+.spinnerRing:nth-child(1) {
+  border-top-color: #1a73e8;
+  animation-delay: 0s;
+}
+
+.spinnerRing:nth-child(2) {
+  border-right-color: #1a73e8;
+  animation-delay: 0.3s;
+  transform: scale(0.8);
+}
+
+.spinnerRing:nth-child(3) {
+  border-bottom-color: #1a73e8;
+  animation-delay: 0.6s;
+  transform: scale(0.6);
+}
+
+/* AI Provider Status Indicators */
+.aiProviders {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin: 24px auto 0;
+  max-width: 320px;
+}
+
+.providerStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(26, 115, 232, 0.1);
+  border-radius: 12px;
+  font-size: 11px;
+  color: #202124;
+  min-width: 70px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.providerStatus.complete {
+  background: rgba(52, 168, 83, 0.1);
+  border-color: rgba(52, 168, 83, 0.3);
+}
+
+.providerStatus.failed {
+  background: rgba(234, 67, 53, 0.1);
+  border-color: rgba(234, 67, 53, 0.3);
+}
+
+.providerName {
+  font-weight: 500;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.statusWaiting {
+  background-color: #dadce0;
+}
+
+.statusAnalyzing {
+  background-color: #1a73e8;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.statusComplete {
+  background-color: #34a853;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.statusFailed {
+  background-color: #ea4335;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+
+/* Typewriter Effect */
+.typewriterContainer {
+  margin-top: 24px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.typewriterText {
+  font-size: 12px;
+  color: #5f6368;
+  font-family: 'SF Mono', Monaco, monospace;
+  border-right: 2px solid #1a73e8;
+  white-space: nowrap;
+  overflow: hidden;
+  animation: typewriter 2s steps(30) infinite, blink 1s ease-in-out infinite;
+}
+
+.loadingSteps {
+  margin-top: 24px;
+  font-size: 12px;
+  color: #5f6368;
+  animation: fadeInUp 0.6s ease-out 0.4s both;
+}
+
+@keyframes modernSpin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.7; transform: scale(1.1); }
+}
+
+@keyframes typewriter {
+  0% { width: 0; }
+  50% { width: 100%; }
+  100% { width: 0; }
+}
+
+@keyframes blink {
+  0%, 50% { border-color: #1a73e8; }
+  51%, 100% { border-color: transparent; }
+}
+
+@keyframes progressAnimation {
+  0% { width: 0%; }
+  50% { width: 70%; }
+  100% { width: 100%; }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
 
 .starterScreen {
   text-align: center;
@@ -227,4 +478,21 @@
 
 .headerButtonHidden {
   display: none;
+}
+
+.fixedAnalyzeButton {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  padding: 16px 20px;
+  border-top: 1px solid #e0e0e0;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+}
+
+.fixedAnalyzeButton .analyzeButton {
+  width: 100%;
+  margin: 0;
 } 

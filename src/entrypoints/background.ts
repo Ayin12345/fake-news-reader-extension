@@ -282,32 +282,59 @@ export default defineBackground({
             console.log('HuggingFace key length:', import.meta.env.VITE_HUGGINGFACE_API_KEY?.length || 0);
             console.log('HuggingFace key starts with:', import.meta.env.VITE_HUGGINGFACE_API_KEY?.substring(0, 5) || 'none');
             
-            const results = await Promise.allSettled(
-              providers.map(async (provider: string) => {
-                console.log(`Trying provider: ${provider}`);
-                try {
-                  switch (provider) {
-                  case 'OpenAI':
-                    return await fetchOpenAI(message.content, import.meta.env.VITE_OPENAI_API_KEY || '')
-                  case 'Gemini':
-                    return await fetchGemini(message.content, import.meta.env.VITE_GEMINI_API_KEY || '')
-                  case 'Cohere':
-                    return await fetchCohere(message.content, import.meta.env.VITE_COHERE_API_KEY || '')
-                  case 'Mistral7B':
-                    return await fetchMistral7B(message.content, import.meta.env.VITE_HUGGINGFACE_API_KEY || '')
-                  case 'Mixtral8x7B':
-                    return await fetchMixtral8x7B(message.content, import.meta.env.VITE_HUGGINGFACE_API_KEY || '')
-                  case 'Llama':
-                    return await fetchLlama(message.content, import.meta.env.VITE_HUGGINGFACE_API_KEY || '')
-                  default:
-                    throw new Error(`Unknown provider: ${provider}`)
+            // Create individual promises that send updates as they complete
+            const providerPromises = providers.map(async (provider: string) => {
+              console.log(`Trying provider: ${provider}`);
+              try {
+                let result;
+                switch (provider) {
+                case 'OpenAI':
+                  result = await fetchOpenAI(message.content, import.meta.env.VITE_OPENAI_API_KEY || '')
+                  break;
+                case 'Gemini':
+                  result = await fetchGemini(message.content, import.meta.env.VITE_GEMINI_API_KEY || '')
+                  break;
+                case 'Cohere':
+                  result = await fetchCohere(message.content, import.meta.env.VITE_COHERE_API_KEY || '')
+                  break;
+                case 'Mistral7B':
+                  result = await fetchMistral7B(message.content, import.meta.env.VITE_HUGGINGFACE_API_KEY || '')
+                  break;
+                case 'Mixtral8x7B':
+                  result = await fetchMixtral8x7B(message.content, import.meta.env.VITE_HUGGINGFACE_API_KEY || '')
+                  break;
+                case 'Llama':
+                  result = await fetchLlama(message.content, import.meta.env.VITE_HUGGINGFACE_API_KEY || '')
+                  break;
+                default:
+                  throw new Error(`Unknown provider: ${provider}`)
                 }
-                } catch (error) {
-                  console.error(`Error in provider ${provider}:`, error);
-                  throw error;
-                }
-              })
-            )
+                
+                // Send success update immediately
+                chrome.runtime.sendMessage({
+                  type: 'PROVIDER_UPDATE',
+                  provider: provider,
+                  status: 'complete'
+                });
+                console.log(`Provider ${provider} completed successfully`);
+                
+                return result;
+              } catch (error) {
+                console.error(`Error in provider ${provider}:`, error);
+                
+                // Send failure update immediately
+                chrome.runtime.sendMessage({
+                  type: 'PROVIDER_UPDATE',
+                  provider: provider,
+                  status: 'failed'
+                });
+                console.log(`Provider ${provider} failed`);
+                
+                throw error;
+              }
+            });
+
+            const results = await Promise.allSettled(providerPromises)
 
             // Process results
             const successfulResults = results
