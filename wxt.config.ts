@@ -11,11 +11,23 @@ export default defineConfig({
       "tabs",
       "sidePanel"
     ],
+    host_permissions: ["<all_urls>"],
     action: {
-      default_title: "Open Fake News Reader"
+      default_title: "Open NewsScan"
     },
     side_panel: {
       default_path: "sidepanel.html"
-    }
+    },
+    web_accessible_resources: [
+      {
+        resources: [
+          "sidepanel.html",
+          "chunks/*",
+          "assets/*",
+          "logo.png"
+        ],
+        matches: ["<all_urls>"]
+      }
+    ]
   }
 }); 

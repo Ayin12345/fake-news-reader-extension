@@ -1,4 +1,5 @@
 export async function fetchOpenAI(content: string, apiKey: string) {
+    console.time('[AI] OpenAI request');
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -6,10 +7,11 @@ export async function fetchOpenAI(content: string, apiKey: string) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4o-mini',
         messages: [{ role: 'user', content }]
       })
     })
+    console.timeEnd('[AI] OpenAI request');
     const data = await response.json();
     if (data.choices && data.choices[0] && data.choices[0].message.content) {
       return data.choices[0].message.content;
@@ -18,8 +20,9 @@ export async function fetchOpenAI(content: string, apiKey: string) {
     }
   }
 
-export async function fetchGemini(content: string, apiKey: string) {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
+async function fetchGeminiWithModel(content: string, apiKey: string, model: string) {
+    console.time(`[AI] Gemini ${model} request`);
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -32,207 +35,67 @@ export async function fetchGemini(content: string, apiKey: string) {
             }],
             generationConfig: {
                 temperature: 0.7,
-                maxOutputTokens: 1000
+                maxOutputTokens: 6000
             }
         })
     });
+    console.timeEnd(`[AI] Gemini ${model} request`);
 
     if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Gemini API error: ${response.status} ${response.statusText} - ${errorText}`);
+        throw new Error(`Gemini ${model} API error: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     const data = await response.json();
-    if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0]) {
-        return data.candidates[0].content.parts[0].text;
+    console.log(`Gemini ${model} API Response Data:`, JSON.stringify(data, null, 2));
+    
+    if (data.candidates && data.candidates[0]) {
+        const candidate = data.candidates[0];
+        
+        // Check for different finish reasons
+        if (candidate.finishReason === 'MAX_TOKENS') {
+            throw new Error(`Gemini ${model} response was truncated due to token limit. Try reducing your input length.`);
+        }
+        
+        if (candidate.finishReason === 'SAFETY') {
+            throw new Error(`Gemini ${model} response was blocked due to safety filters.`);
+        }
+        
+        // Check if we have content with parts
+        if (candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text) {
+            return candidate.content.parts[0].text;
+        }
+        
+        // If no parts, check if there's text directly in content
+        if (candidate.content && candidate.content.text) {
+            return candidate.content.text;
+        }
+        
+        throw new Error(`Gemini ${model} response incomplete. Finish reason: ${candidate.finishReason || 'unknown'}`);
     } else {
-        throw new Error(data.error?.message || 'No response from Gemini');
+        console.error(`Gemini ${model} response structure:`, data);
+        throw new Error(data.error?.message || `No candidates in Gemini ${model} response`);
     }
 }
 
-export async function fetchLlama(content: string, apiKey: string) {
-    console.log('Llama API Key:', apiKey ? 'Present' : 'Missing');
-    console.log('API Key length:', apiKey.length);
-    
+export async function fetchGemini(content: string, apiKey: string) {
+    // Try Gemini 2.5 Flash first (faster, newer)
     try {
-        const response = await fetch('https://api-inference.huggingface.co/models/meta-llama/Llama-3.3-70B-Instruct', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                inputs: content,
-                parameters: {
-                    max_new_tokens: 500,
-                    temperature: 0.7,
-                    return_full_text: false
-                }
-            })
-        });
-
-        console.log('Llama Response Status:', response.status, response.statusText);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Llama API Full Error:', {
-                status: response.status,
-                statusText: response.statusText,
-                errorText: errorText,
-                headers: Object.fromEntries(response.headers.entries())
-            });
-            throw new Error(`Llama API error: ${response.status} ${response.statusText} - ${errorText}`);
-        }
-
-        const data = await response.json();
-        console.log('Llama API Response Data:', data);
-
-        if (Array.isArray(data) && data[0]?.generated_text) {
-            return data[0].generated_text;
-        }
-
-        console.error('Llama API Invalid Response Format:', data);
-        throw new Error(data.error || 'No valid response from Llama');
+        console.log('[AI] Trying Gemini 2.5 Flash...');
+        return await fetchGeminiWithModel(content, apiKey, 'gemini-2.5-flash');
     } catch (error) {
-        console.error('Llama API Call Failed:', error);
-        throw error;
+        console.warn('[AI] Gemini 2.5 Flash failed, trying backup model:', error);
+        
+        // Fallback to Gemini 1.5 Pro (more reliable, older)
+        try {
+            console.log('[AI] Trying Gemini 1.5 Pro as backup...');
+            return await fetchGeminiWithModel(content, apiKey, 'gemini-2.5-flash-lite');
+        } catch (backupError) {
+            console.error('[AI] Both Gemini models failed:', backupError);
+            // Throw a more user-friendly error message
+            throw new Error('Analysis failed due to AI model limitations. Please try with a shorter article or try again later.');
+        }
     }
 }
 
-//add gemini in later, need to be 18+ 
-export async function fetchCohere(content: string, apiKey: string) {
-    console.log('Cohere API Key:', apiKey ? 'Present' : 'Missing');
-    console.log('Cohere API Key length:', apiKey.length);
-    
-    try {
-        const response = await fetch('https://api.cohere.ai/v1/generate', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ 
-                model: 'command',
-                prompt: content,
-                max_tokens: 1250,
-             })
-        });
 
-        console.log('Cohere Response Status:', response.status, response.statusText);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Cohere API Full Error:', {
-                status: response.status,
-                statusText: response.statusText,
-                errorText: errorText,
-                headers: Object.fromEntries(response.headers.entries())
-            });
-            throw new Error(`Cohere API error: ${response.status} ${response.statusText} - ${errorText}`);
-        }
-        
-        const data = await response.json();
-        console.log('Cohere API Response Data:', data);
-
-        if (data.generations && data.generations[0] && data.generations[0].text) {
-            return data.generations[0].text;
-        } else {
-            throw new Error(data.message || 'No response from Cohere');
-        }
-    } catch (error) {
-        console.error('Cohere API Call Failed:', error);
-        throw error;
-    }
-}
-
-export async function fetchMistral7B(content: string, apiKey: string) {
-    try {
-        const response = await fetch('https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                inputs: content,
-                parameters: {
-                    max_new_tokens: 500,
-                    temperature: 0.7,
-                    return_full_text: false
-                }
-            })
-        });
-
-        console.log('Mistral Response Status:', response.status, response.statusText);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Mistral API Full Error:', {
-                status: response.status,
-                statusText: response.statusText,
-                errorText: errorText,
-                headers: Object.fromEntries(response.headers.entries())
-            });
-            throw new Error(`Mistral API error: ${response.status} ${response.statusText} - ${errorText}`);
-        }
-
-        const data = await response.json();
-        console.log('Mistral API Response Data:', data);
-
-        if (Array.isArray(data) && data[0]?.generated_text) {
-            return data[0].generated_text;
-        }
-
-        console.error('Mistral API Invalid Response Format:', data);
-        throw new Error(data.error || 'No valid response from Mistral 7B');
-    } catch (error) {
-        console.error('Mistral API Call Failed:', error);
-        throw error;
-    }
-}
-
-export async function fetchMixtral8x7B(content: string, apiKey: string) {
-    try {
-        const response = await fetch('https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ 
-                inputs: content,
-                parameters: {
-                    max_new_tokens: 500,
-                    temperature: 0.7,
-                    return_full_text: false
-                }
-            })
-        });
-
-        console.log('Mixtral Response Status:', response.status, response.statusText);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Mixtral API Full Error:', {
-                status: response.status,
-                statusText: response.statusText,
-                errorText: errorText,
-                headers: Object.fromEntries(response.headers.entries())
-            });
-            throw new Error(`Mixtral API error: ${response.status} ${response.statusText} - ${errorText}`);
-        }
-        
-        const data = await response.json();
-        console.log('Mixtral API Response Data:', data);
-
-        if (Array.isArray(data) && data[0] && data[0].generated_text) {
-            return data[0].generated_text;    
-        }
-
-        console.error('Mixtral API Invalid Response Format:', data);
-        throw new Error(data.error || 'No response from Mixtral 8x7B');
-    } catch (error) {
-        console.error('Mixtral API Call Failed:', error);
-        throw error;
-    }
-}

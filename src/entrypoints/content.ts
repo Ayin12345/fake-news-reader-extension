@@ -1,400 +1,368 @@
 import { defineContentScript } from '#imports';
+import { getMulti, setStorage } from '../utils/storage';
 
 export default defineContentScript({
   matches: ['<all_urls>'],
+  exclude_matches: [
+    'chrome://*',
+    'chrome-extension://*',
+    'moz-extension://*',
+    'edge://*',
+    'about:*',
+    'chrome-devtools://*',
+    'devtools://*',
+    '*://console.cloud.google.com/*',
+    '*://developers.google.com/*',
+    '*://apis.google.com/*',
+    '*://www.googleapis.com/*'
+  ],
   main() {
-    // Content script - runs on web pages
-    console.log('Content script loaded')
+    // Don't run on certain pages where the extension shouldn't be active
+    if (location.protocol === 'chrome:' || 
+        location.protocol === 'chrome-extension:' || 
+        location.protocol === 'moz-extension:' ||
+        location.protocol === 'edge:' ||
+        location.protocol === 'about:' ||
+        location.href.includes('chrome-devtools://') ||
+        location.href.includes('devtools://') ||
+        location.href.includes('console.cloud.google.com') ||
+        location.href.includes('developers.google.com') ||
+        location.href.includes('apis.google.com') ||
+        location.href.includes('www.googleapis.com')) {
+      console.log('[FNR] Extension disabled on restricted page:', location.href);
+      return;
+    }
+    
+    console.log('[FNR] Content script starting on', location.href);
 
-    //content script logic
+    const DEFAULT_WIDTH_PX = 440;
+    const EXPANDED_WIDTH_PX = 720; // Wider width for analysis results
+    let currentWidthPx = DEFAULT_WIDTH_PX;
+
+    // Debug helpers
+    (window as any).fnrOpenSidebar = () => ensureInjected(true);
+    (window as any).fnrDebug = () => {
+      const el = document.getElementById('fake-news-reader-injected-sidebar') as HTMLElement | null;
+      console.log('[FNR] debug', {
+        exists: !!el,
+        widthStyle: el?.style.width,
+        display: el?.style.display,
+        rect: el?.getBoundingClientRect?.(),
+        bodyMarginRight: getComputedStyle(document.body).marginRight,
+      });
+    };
+
+    // Reply to ping from background for readiness check
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.type === 'GET_PAGE_CONTENT') {
-        console.log('Processing content on:', window.location.href)
-        
-        // Check if page is ready
-        if (document.readyState !== 'complete') {
-          console.log('Page not ready, waiting...');
-          // Wait for page to be ready
-          window.addEventListener('load', () => {
-            setTimeout(() => {
-              processPageContent(sendResponse);
-            }, 100);
-          });
-          return true;
-        }
-        
-        // If page is ready, process immediately
-        setTimeout(() => {
-          processPageContent(sendResponse);
-        }, 500); // Increased delay to allow dynamic content to load
-        
+      if (message?.type === 'FNR_PING') {
+        sendResponse({ ok: true });
         return true;
       }
     });
-    
+
+    // Toggle from toolbar: open if not present, else close
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message?.type === 'TOGGLE_INJECTED_SIDEBAR') {
+        console.log('🔥🔥🔥 SIDEBAR OPENER #4: CONTENT SCRIPT - TOGGLE MESSAGE RECEIVED 🔥🔥🔥');
+        console.log('[FNR] Toggle message received:', message);
+        console.log('📄 Has preloadedAnalysis:', !!message.preloadedAnalysis);
+        console.log('📄 Has hasPreloadedAnalysis flag:', !!message.hasPreloadedAnalysis);
+        
+        const exists = !!document.getElementById('fake-news-reader-injected-sidebar');
+        if (exists) {
+          // If sidebar exists, check if we should keep it open or close it
+          // For analysis loading, we want to keep it open
+          if (message.keepOpen) {
+            console.log('🔥🔥🔥 SIDEBAR OPENER #5: CONTENT SCRIPT - KEEPING SIDEBAR OPEN 🔥🔥🔥');
+            console.log('[FNR] Sidebar exists, keeping it open for analysis');
+            ensureInjected(true);
+          // If we have preloaded analysis, send it to the iframe
+          if (message.preloadedAnalysis || message.hasPreloadedAnalysis) {
+            console.log('✅ Sending PRELOADED_ANALYSIS message to iframe');
+            setTimeout(() => {
+              const iframe = document.querySelector('#fake-news-reader-injected-sidebar iframe') as HTMLIFrameElement;
+              if (iframe?.contentWindow) {
+                iframe.contentWindow.postMessage({
+                  type: 'PRELOADED_ANALYSIS',
+                  data: message.preloadedAnalysis
+                }, '*');
+              }
+            }, 50);
+          } else {
+            console.log('❌ No preloaded analysis, would send TRIGGER_NEW_ANALYSIS');
+          }
+          } else {
+            console.log('[FNR] Sidebar exists, toggling it closed');
+            removeInjected();
+          }
+        } else {
+          console.log('🔥🔥🔥 SIDEBAR OPENER #6: CONTENT SCRIPT - CREATING NEW SIDEBAR 🔥🔥🔥');
+          console.log('[FNR] Sidebar does not exist, creating it');
+          ensureInjected(true);
+          // If we have preloaded analysis, send it to the iframe after creation
+          if (message.preloadedAnalysis || message.hasPreloadedAnalysis) {
+            console.log('✅ TAKING PRELOADED PATH - Sending PRELOADED_ANALYSIS message to iframe (new sidebar)');
+            console.log('✅ Will NOT send TRIGGER_NEW_ANALYSIS because we have preloaded data');
+            setTimeout(() => {
+              const iframe = document.querySelector('#fake-news-reader-injected-sidebar iframe') as HTMLIFrameElement;
+              if (iframe?.contentWindow) {
+                console.log('📤 Actually sending PRELOADED_ANALYSIS message now');
+                iframe.contentWindow.postMessage({
+                  type: 'PRELOADED_ANALYSIS',
+                  data: message.preloadedAnalysis
+                }, '*');
+              }
+            }, 100);
+          } else {
+            console.log('❌ TAKING TRIGGER PATH - No preloaded analysis, sending TRIGGER_NEW_ANALYSIS');
+            // If no preloaded analysis, trigger manual analysis when opened via extension icon
+            setTimeout(() => {
+              const iframe = document.querySelector('#fake-news-reader-injected-sidebar iframe') as HTMLIFrameElement;
+              if (iframe?.contentWindow) {
+                console.log('📤 Actually sending TRIGGER_NEW_ANALYSIS message now');
+                iframe.contentWindow.postMessage({
+                  type: 'TRIGGER_NEW_ANALYSIS'
+                }, '*');
+              }
+            }, 50);
+          }
+        }
+      }
+      
+      // Handle expansion for analysis results
+      if (message?.type === 'EXPAND_FOR_ANALYSIS') {
+        const shouldExpand = message.expanded;
+        currentWidthPx = shouldExpand ? EXPANDED_WIDTH_PX : DEFAULT_WIDTH_PX;
+        
+        // Ensure sidebar exists and apply new layout
+        if (shouldExpand && !document.getElementById('fake-news-reader-injected-sidebar')) {
+          console.log('🔥🔥🔥 SIDEBAR OPENER #7: CONTENT SCRIPT - EXPAND_FOR_ANALYSIS CREATING SIDEBAR 🔥🔥🔥');
+          ensureInjected(true);
+        } else if (document.getElementById('fake-news-reader-injected-sidebar')) {
+          applyLayout();
+        }
+      }
+    });
+
+    console.log('[FNR] Content script loaded');
+
+    // Handle page content request from background
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message.type === 'GET_PAGE_CONTENT') {
+        const run = () => setTimeout(() => processPageContent(sendResponse), 300);
+        if (document.readyState !== 'complete') {
+          window.addEventListener('load', run, { once: true });
+        } else {
+          run();
+        }
+        return true; // keep the channel open for async sendResponse
+      }
+    });
+
     function processPageContent(sendResponse: (response: any) => void) {
       try {
-        // Try to find the correct article tag (avoid radio player articles)
-        let articleTag = null;
-        let bestArticle = null;
-        let bestScore = 0;
-        
-        // First, try to find article tags and score them by content quality
-        const allArticles = document.querySelectorAll('article');
-        console.log('Found', allArticles.length, 'article tags on page');
-        
-        for (let i = 0; i < allArticles.length; i++) {
-          const article = allArticles[i];
-          const articleText = article.innerText || '';
-          
-          // Skip articles that are clearly not content
-          const hasNonContent = 
-            // Media players (radio, video, audio)
-            articleText.includes('LIVE') ||
-            articleText.includes('Resume') ||
-            articleText.includes('Listen') ||
-            articleText.includes('Play') ||
-            articleText.includes('Pause') ||
-            articleText.includes('Volume') ||
-            articleText.includes('WAMU') ||
-            articleText.includes('88.5') ||
-            articleText.includes('HD 88.5') ||
-            articleText.includes('OPEN') ||
-            articleText.includes('TRANSCRIPT') ||
-            // Social media/ads
-            articleText.includes('Follow us') ||
-            articleText.includes('Subscribe') ||
-            articleText.includes('Newsletter') ||
-            articleText.includes('Sign up') ||
-            // Navigation/menu
-            articleText.includes('Menu') ||
-            articleText.includes('Navigation') ||
-            articleText.includes('Search') ||
-            // Or has media player elements
-            article.querySelector('.play-initial, .audio-player, .radio-player, .video-player, .media-player, [class*="player"], [class*="audio"], [class*="video"], [class*="listen"], [class*="resume"]');
-          
-          if (hasNonContent) {
-            console.log(`Article ${i}: SKIPPED (has non-content), text preview: ${articleText.substring(0, 100)}`);
-            continue;
-          }
-          
-          // Score the article based on content quality
-          let score = 0;
-          
-          // Base score from text length (more content = better)
-          score += Math.min(articleText.length / 10, 50); // Cap at 50 points
-          
-          // Bonus for having paragraphs (indicates structured content)
-          const paragraphs = article.querySelectorAll('p');
-          score += paragraphs.length * 5;
-          
-          // Bonus for having headings (indicates article structure)
-          const headings = article.querySelectorAll('h1, h2, h3, h4, h5, h6');
-          score += headings.length * 3;
-          
-          // Penalty for too many links (might be navigation)
-          const links = article.querySelectorAll('a');
-          if (links.length > 20) {
-            score -= 20;
-          }
-          
-          // Bonus for having article-specific classes
-          if (article.className.includes('story') || article.className.includes('article') || 
-              article.className.includes('content') || article.className.includes('post')) {
-            score += 20;
-          }
-          
-          // Bonus for having article-specific IDs
-          if (article.id.includes('story') || article.id.includes('article') || 
-              article.id.includes('content') || article.id.includes('post')) {
-            score += 15;
-          }
-          
-          // Count words in the article
-          const wordCount = articleText.trim().split(/\s+/).filter(word => word.length > 0).length;
-          
-          console.log(`Article ${i}: score=${score}, words=${wordCount}, text preview: ${articleText.substring(0, 100)}`);
-          
-          // Only consider articles with substantial content (at least 50 words)
-          if (score > bestScore && articleText.length > 100 && wordCount >= 50) {
-            bestScore = score;
-            bestArticle = article;
-          }
-        }
-        
-        if (bestArticle) {
-          articleTag = bestArticle;
-          console.log(`Selected best article with score ${bestScore}`);
-          console.log('Selected article text preview:', bestArticle.innerText.substring(0, 200));
-        } else {
-          console.log('No suitable article found, will use fallback selectors');
-        }
-        
-        // If no good article found, try other selectors
-        if (!articleTag) {
-          console.log('No suitable article found, trying alternative selectors...');
-          
-          // First try to find the main content area
-          const mainContent = document.querySelector('main, [role="main"], .main-content, .content-main');
-          if (mainContent) {
-            console.log('Found main content area, using that');
-            articleTag = mainContent;
-          } else {
-            const selectors = [
-              '[role="main"]',
-              'main',
-              '.content',
-              '.main-content',
-              '.page-content',
-              // Article content selectors
-              '.article-content',
-              '.story-content', 
-              '.post-content',
-              '.entry-content',
-              '.article-body',
-              '.story-body',
-              '.post-body',
-              '.entry-body',
-              '.content-body',
-              // Generic content containers
-              '.content-wrapper',
-              '.article-wrapper',
-              '.story-wrapper',
-              '.post-wrapper',
-              // Common news site patterns
-              '.article-text',
-              '.story-text',
-              '.post-text',
-              '.entry-text'
-            ];
-          
-            for (const selector of selectors) {
-              articleTag = document.querySelector(selector);
-              if (articleTag) {
-                console.log('Found content using selector:', selector);
-                break;
-              }
-            }
-          }
-        }
-        
-        if (!articleTag) {
-          console.log('No article tag found, trying fallback selectors...');
-          // Last resort - try to find any content container
-          const fallbackSelectors = [
-            'body',
-            '#content',
-            '.page-content',
-            '.main-content'
-          ];
-          
-          for (const selector of fallbackSelectors) {
-            articleTag = document.querySelector(selector);
-            if (articleTag) {
-              console.log('Found content using fallback selector:', selector);
-              break;
-            }
-          }
-          
-          if (!articleTag) {
-            sendResponse({ error: "Unable to extract content from this page." });
-            return;
-          }
-        }
+        let container: HTMLElement | null = null;
+        container = document.querySelector('article');
+        if (!container) container = document.querySelector('main, [role="main" ]') as HTMLElement | null;
+        if (!container) container = document.querySelector('.article, .story, .post, .entry, .content-body') as HTMLElement | null;
+        if (!container) container = document.body;
 
-        // 2. Extract content and count words/links
-        const articleClone = articleTag.cloneNode(true) as HTMLElement;
-        
-        // Remove scripts, styles, and structured data first
-        articleClone.querySelectorAll('script, style, noscript').forEach(el => el.remove());
-        
-        // Remove navigation, footer, and other non-content elements (more aggressive for Yahoo)
-        const elementsToRemove = [
-          'nav', 'header', 'footer', '.navigation', '.nav', '.menu',
-          '.sidebar', '.related', '.share', '.social', '.breadcrumb',
-          '[role="navigation"]', '[role="banner"]', '[role="contentinfo"]',
-          '.tags', '.categories', '.metadata', '.byline', '.author-info',
-          '.related-terms', '.details', '.share-buttons',
-          // Video and media elements (NPR specific)
-          '.video-player', '.audio-player', '.media-player', 
-          '.video-container', '.audio-container', '.media-container',
-          '.player', '.livestream', '.live-player', '.video-embed',
-          '[data-video]', '[data-audio]', '[data-player]',
-          // Yahoo-specific elements
-          '.advertisement', '.ad', '.ads', '.promo', '.trending',
-          '.more-stories', '.recommended', '.newsletter', '.subscription',
-          '.toolbar', '.comments', '.social-share',
-          '.caas-carousel', '.caas-readmore', '.caas-attr-meta',
-          // More aggressive cleanup
-          '[data-module]', '.photo-credit',
-          '.story-meta', '.story-byline', '.story-timestamp',
-          // NPR specific cleanup
-          '.audio-module', '.video-module', '.media-credit',
-          '.listen-live', '.radio-player', '.wamu-player',
-          '.resume-listening', '.audio-controls', '.player-controls',
-          '[class*="player"]', '[class*="audio"]', '[class*="listening"]',
-          '[id*="player"]', '[id*="audio"]', '[id*="radio"]'
-        ];
-        
-        elementsToRemove.forEach(selector => {
-          articleClone.querySelectorAll(selector).forEach(el => el.remove());
-        });
-        
-        // Try to find the specific storytext content first (NPR specific)
-        const storytextDiv = articleClone.querySelector('#storytext, .storytext, .story-text, .story-body, .article-body, .content-body, .story-content, .article-content, [class*="story"], [id*="story"]');
-        let cleanContent = '';
-        
-        console.log('=== DETAILED DEBUG ===');
-        console.log('Looking for storytext div...');
-        console.log('storytextDiv found:', !!storytextDiv);
-        
-        // Debug: Check what elements are actually available
-        console.log('All divs in article:', articleClone.querySelectorAll('div').length);
-        console.log('All elements with "story" in class or id:');
-        articleClone.querySelectorAll('[class*="story"], [id*="story"]').forEach((el, i) => {
-          console.log(`  ${i}: ${el.tagName} id="${el.id}" class="${el.className}"`);
-        });
-        
-        console.log('All elements with "text" in class or id:');
-        articleClone.querySelectorAll('[class*="text"], [id*="text"]').forEach((el, i) => {
-          console.log(`  ${i}: ${el.tagName} id="${el.id}" class="${el.className}"`);
-        });
-        
-        // Debug: Check what's actually inside the article tag
-        console.log('Article tag innerHTML length:', articleClone.innerHTML.length);
-        console.log('Article tag innerText length:', (articleClone as HTMLElement).innerText.length);
-        console.log('Article tag innerText preview:', (articleClone as HTMLElement).innerText.substring(0, 300));
-        console.log('All direct children of article:', articleClone.children.length);
-        Array.from(articleClone.children).forEach((child, i) => {
-          console.log(`  Child ${i}: ${child.tagName} id="${child.id}" class="${child.className}"`);
-        });
-        
-        if (storytextDiv) {
-          console.log('storytextDiv tagName:', storytextDiv.tagName);
-          console.log('storytextDiv id:', storytextDiv.id);
-          console.log('storytextDiv classes:', storytextDiv.className);
-          console.log('storytextDiv innerText preview:', (storytextDiv as HTMLElement).innerText.substring(0, 200));
-        }
-        
-        if (storytextDiv) {
-          console.log('Found storytext div, extracting from there');
-          const storytextParagraphs = storytextDiv.querySelectorAll('p');
-          console.log('Paragraphs in storytext:', storytextParagraphs.length);
-          
-          storytextParagraphs.forEach((p, index) => {
-            const text = p.innerText.trim();
-            console.log(`Paragraph ${index}:`, text.substring(0, 100));
-            if (text.length > 20 && 
-                !text.includes('Advertisement') && 
-                text.split(' ').length > 3) {
-              cleanContent += text + ' ';
-              console.log(`✓ Added paragraph ${index} to content`);
-            } else {
-              console.log(`✗ Skipped paragraph ${index} (length: ${text.length}, words: ${text.split(' ').length})`);
-            }
-          });
-        } else {
-          console.log('No storytext div found, using fallback method');
-          // Fallback to all paragraphs with more aggressive filtering
-          const paragraphs = articleClone.querySelectorAll('p');
-          console.log('Total paragraphs found in article:', paragraphs.length);
-          if (paragraphs.length > 0) {
-            paragraphs.forEach((p, index) => {
-              const text = p.innerText.trim();
-              console.log(`Fallback paragraph ${index}:`, text.substring(0, 100));
-              // Improved content filtering
-              if (text.length > 20 && 
-                  !text.includes('Advertisement') && 
-                  !text.includes('©') &&
-                  !text.includes('Subscribe') &&
-                  !text.includes('Follow us') &&
-                  !text.includes('Live Radio') &&
-                  !text.includes('ClosedDisplay') &&
-                  !text.includes('LIVE') &&
-                  !text.includes('ON AIR') &&
-                  !text.includes('Listen Live') &&
-                  !text.includes('WAMU') &&
-                  !text.includes('88.5') &&
-                  !text.includes('HD 88.5') &&
-                  !text.includes('ListeningWAMU') &&
-                  !text.includes('The Daily') &&
-                  !text.includes('RESUME LISTENING') &&
-                  !text.match(/^\s*\d+\s*$/) && // Skip lone numbers
-                  !text.match(/^[A-Z\s]+$/) && // Skip all caps (likely headings/metadata)
-                  !text.match(/^\d+\s*(SECONDS|MINUTES|HOURS)$/i) && // Skip time indicators
-                  text.split(' ').length > 3) { // Must have at least 4 words
-                cleanContent += text + ' ';
-                console.log(`✓ Added fallback paragraph ${index} to content`);
-              } else {
-                console.log(`✗ Skipped fallback paragraph ${index} (length: ${text.length}, words: ${text.split(' ').length})`);
-              }
-            });
-          }
-        }
-        
-        // If still not enough content, try other text elements
-        if (cleanContent.length < 200) {
-          // Try div elements that might contain article text
-          const textElements = articleClone.querySelectorAll('div, span');
-          textElements.forEach(el => {
-            const text = (el as HTMLElement).innerText.trim();
-            if (text.length > 30 && 
-                !text.includes('Advertisement') && 
-                !text.includes('©') &&
-                text.split(' ').length > 5) {
-              // Only add if it's not already included
-              if (!cleanContent.includes(text.substring(0, 50))) {
-                cleanContent += text + ' ';
-              }
-            }
-          });
-        }
+        const clone = container.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll('script, style, noscript, iframe, nav, header, footer, aside, .ads, [role="complementary"]').forEach((n) => n.remove());
 
-        // Final fallback
-        if (cleanContent.length < 200) {
-          cleanContent = articleClone.innerText || '';
-        }
-        
-        // Count links for debugging purposes only
-        const linkCount = articleClone.querySelectorAll('a').length;
-        
-        // Clean up excessive whitespace and line breaks
-        let content = cleanContent
-          .replace(/\s+/g, ' ')           
-          .replace(/\n\s*\n/g, '\n')      
-          .trim();
-          
-          
-          const wordCount = content.split(/\s+/).filter(word => word.length > 0).length;
-          
-          console.log('=== CONTENT EXTRACTION DEBUG ===');
-          console.log('Article tag found:', !!articleTag);
-          console.log('Article tag selector used:', articleTag?.tagName || 'none');
-          console.log('Storytext div found:', !!storytextDiv);
-          console.log('Clean content length:', cleanContent.length);
-          console.log('Final content length:', content.length);
-          console.log('Word count:', wordCount, 'Link count:', linkCount);
-          console.log('Content preview:', content.substring(0, 300) + '...');
-          console.log('================================');
-          
-          // 3. Check word count constraints only
-          if (wordCount < 100 || wordCount > 5000) {
-            sendResponse({error: "Not a valid article: must have 100-5000 words. This article has " + wordCount + " words."});
-            return;
-          }
+        const paragraphs = Array.from(clone.querySelectorAll('p')).map((p) => p.textContent?.trim() || '');
+        let content = paragraphs.filter(Boolean).join(' ');
+        if (content.length < 200) content = (clone.innerText || '').trim();
 
-          // 4. If all checks pass, send the article info
-          const pageContent = {
-            title: document.title,
-            content: content,
-            url: window.location.href,
-            wordCount: wordCount
-          };
-          sendResponse({ success: true, data: pageContent });
-      } catch (error) {
-        console.error('Content script error:', error);
-        sendResponse({ error: "Failed to extract page content." });
+        content = content.replace(/\s+/g, ' ').trim();
+        const wordCount = content.split(/\s+/).filter(Boolean).length;
+        // Remove minimum word count requirement - let AI handle content analysis
+
+        sendResponse({ success: true, data: { title: document.title, content, url: location.href, wordCount } });
+      } catch (err) {
+        try { sendResponse({ error: 'Failed to extract page content.' }); } catch {}
       }
     }
-  }
+
+    // Injected Sidebar logic (fixed width, no persistence)
+    let injectedRoot: HTMLElement | null = null;
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const transitionMs = mql.matches ? 0 : 160;
+
+    function ensureInjected(forceShow: boolean) {
+      if (!injectedRoot) {
+        createInjected();
+      }
+      if (forceShow) {
+        injectedRoot!.style.opacity = '1';
+      }
+      applyLayout();
+    }
+
+    function createInjected() {
+      if (injectedRoot || document.getElementById('fake-news-reader-injected-sidebar')) return;
+      injectedRoot = document.createElement('div');
+      injectedRoot.id = 'fake-news-reader-injected-sidebar';
+      injectedRoot.setAttribute('aria-label', 'Fake News Reader Sidebar');
+      injectedRoot.style.position = 'fixed';
+      injectedRoot.style.top = '0';
+      injectedRoot.style.right = '0';
+      injectedRoot.style.height = '100vh';
+      injectedRoot.style.zIndex = '2147483647';
+      injectedRoot.style.background = '#fff';
+      injectedRoot.style.borderLeft = '1px solid rgba(0,0,0,0.12)';
+      injectedRoot.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.06), -2px 0 8px rgba(0,0,0,0.06)';
+      injectedRoot.style.overflow = 'hidden';
+      injectedRoot.style.transition = `width ${transitionMs}ms ease, opacity ${transitionMs}ms ease`;
+      injectedRoot.style.display = 'block';
+
+      const inner = document.createElement('div');
+      inner.style.height = '100%';
+      inner.style.display = 'flex';
+      inner.style.flexDirection = 'column';
+
+      const header = document.createElement('div');
+      header.style.cssText = [
+        'all: initial',
+        'display: flex',
+        'align-items: center',
+        'justify-content: space-between',
+        'padding: 12px 16px',
+        'border-bottom: 1px solid rgba(0,0,0,0.12)',
+        'box-sizing: border-box',
+        'width: 100%',
+        'background: #ffffff',
+        'box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08)'
+      ].join(';');
+
+      // Create logo container
+      const logoContainer = document.createElement('div');
+      console.log('NewsScan: Creating logo container');
+      logoContainer.style.cssText = [
+        'all: initial',
+        'display: flex',
+        'align-items: center',
+        'gap: 8px'
+      ].join(';');
+
+      // Create logo element
+      const logo = document.createElement('img');
+      const logoUrl = chrome.runtime.getURL('logo.png');
+      console.log('NewsScan: Logo URL:', logoUrl);
+      console.log('NewsScan: Chrome runtime ID:', chrome.runtime.id);
+      logo.src = logoUrl;
+      logo.alt = 'NewsScan Logo';
+      logo.style.cssText = [
+        'all: initial',
+        'width: 35px',
+        'height: 35px',
+        'object-fit: contain'
+      ].join(';');
+      
+      // Handle logo load success
+      logo.onload = () => {
+        console.log('NewsScan: Logo loaded successfully');
+      };
+      
+      // Handle logo load error - hide logo if it fails to load
+      logo.onerror = (error) => {
+        console.error('NewsScan: Logo failed to load:', error);
+        console.error('NewsScan: Logo URL that failed:', logoUrl);
+        logo.style.display = 'none';
+      };
+
+      // Create title element
+      const title = document.createElement('span');
+      title.textContent = 'NewsScan';
+      title.style.cssText = [
+        'all: initial',
+        'font: 600 15px system-ui, -apple-system, Segoe UI, Roboto',
+        'color: #202124',
+        'letter-spacing: -0.01em'
+      ].join(';');
+
+      // Add logo and title to container
+      console.log('NewsScan: Adding logo and title to container');
+      logoContainer.appendChild(logo);
+      logoContainer.appendChild(title);
+
+      const closeBtn = document.createElement('button');
+      closeBtn.setAttribute('aria-label', 'Close');
+      closeBtn.textContent = '×';
+      closeBtn.style.cssText = [
+        'all: initial',
+        'display:inline-flex',
+        'align-items:center',
+        'justify-content:center',
+        'width:28px',
+        'height:28px',
+        'cursor:pointer',
+        'font: 600 16px/1 system-ui, -apple-system, Segoe UI, Roboto',
+        'color:#6b7280',
+        'background:transparent',
+        'border-radius: 4px'
+      ].join(';');
+      // The close button should navigate the app back to its home screen
+      // rather than closing the sidebar entirely.
+
+      console.log('NewsScan: Adding logo container to header');
+      header.appendChild(logoContainer);
+      header.appendChild(closeBtn);
+
+      const body = document.createElement('div');
+      body.style.flex = '1';
+      body.style.overflow = 'hidden';
+
+      const iframe = document.createElement('iframe');
+      iframe.title = 'NewsScan';
+      iframe.style.border = '0';
+      iframe.style.width = '100%';
+      iframe.style.height = '100%';
+      iframe.src = chrome.runtime.getURL('sidepanel.html');
+      body.appendChild(iframe);
+
+      // Wire close action to close sidebar
+      closeBtn.onclick = () => {
+        // Reset state first, then close after a brief moment
+        try {
+          iframe.contentWindow?.postMessage({ type: 'TRIGGER_RESET' }, '*');
+        } catch {}
+        // Close sidebar after reset has time to process
+        setTimeout(() => {
+          removeInjected();
+        }, 50);
+      };
+
+      inner.appendChild(header);
+      inner.appendChild(body);
+      injectedRoot.appendChild(inner);
+      document.documentElement.appendChild(injectedRoot);
+      applyLayout();
+    }
+
+    function removeInjected() {
+      if (!injectedRoot) return;
+      injectedRoot.remove();
+      injectedRoot = null;
+      resetBodyPadding();
+    }
+
+    function applyBodyPadding() {
+      document.documentElement.style.scrollBehavior = 'auto';
+      document.body.style.transition = mql.matches ? '' : `margin-right ${transitionMs}ms ease`;
+      document.body.style.marginRight = `${currentWidthPx}px`;
+    }
+
+    function resetBodyPadding() {
+      document.body.style.marginRight = '';
+      document.body.style.transition = '';
+    }
+
+    function applyLayout() {
+      if (!injectedRoot) return;
+      injectedRoot.style.width = `${currentWidthPx}px`;
+      injectedRoot.style.opacity = '1';
+      applyBodyPadding();
+    }
+  },
 });

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import styles from '../styles/AnalysisResults.module.css';
+import { getStorage } from '../../../utils/storage';
 
 interface AnalysisResult {
   provider: string;
@@ -19,6 +20,10 @@ interface AnalysisResultsProps {
   analysis: AnalysisResult[];
   selectedProvider: string;
   onProviderSelect: (provider: string) => void;
+  onNewAnalysis: () => void;
+  isViewingFromRecent?: boolean;
+  pageTitle?: string;
+  onLoadAnalysisForUrl?: (url: string, timestamp?: number) => void;
 }
 
 const calculateAverageScore = (results: AnalysisResult[]): number => {
@@ -34,6 +39,16 @@ const getScoreRange = (results: AnalysisResult[]): { min: number; max: number } 
     min: Math.min(...scores),
     max: Math.max(...scores)
   };
+};
+
+// Fisher-Yates shuffle algorithm
+const shuffleArray = <T,>(array: T[]): T[] => {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
 };
 
 const getAllEvidence = (results: AnalysisResult[]) => {
@@ -61,28 +76,43 @@ const getAllEvidence = (results: AnalysisResult[]) => {
     }
   });
 
-  return Array.from(evidenceMap.entries())
+  const evidence = Array.from(evidenceMap.entries())
     .map(([quote, data]) => ({
       quote,
       impact: data.impact,
       providers: data.providers,
       sentiment: data.sentiment
-    }))
-    .sort((a, b) => b.providers.length - a.providers.length);
+    }));
+
+  // Shuffle the evidence to mix providers instead of grouping by provider count
+  return shuffleArray(evidence);
 };
 
 const getAllLinks = (results: AnalysisResult[]): string[] => {
   const uniqueLinks = new Set<string>();
-  results.forEach(result => {
+  console.log('getAllLinks - processing results:', results);
+  
+  results.forEach((result, index) => {
+    console.log(`Result ${index}:`, result);
+    console.log(`Result ${index} supporting_links:`, result.result.supporting_links);
+    
     if (result.result.supporting_links && Array.isArray(result.result.supporting_links)) {
-      result.result.supporting_links.forEach(link => uniqueLinks.add(link));
+      result.result.supporting_links.forEach(link => {
+        console.log('Adding link:', link);
+        uniqueLinks.add(link);
+      });
+    } else {
+      console.log(`Result ${index} has no supporting_links or it's not an array`);
     }
   });
-  return Array.from(uniqueLinks);
+  
+  const linksArray = Array.from(uniqueLinks);
+  console.log('getAllLinks - final links array:', linksArray);
+  return linksArray;
 };
 
 const getScoreCategory = (score: number) => {
-  if (score >= 80) return { text: 'Excellent', class: styles.scoreExcellent };
+  if (score >= 90) return { text: 'Excellent', class: styles.scoreExcellent };
   if (score >= 60) return { text: 'Good', class: styles.scoreGood };
   if (score >= 40) return { text: 'Fair', class: styles.scoreFair };
   if (score >= 20) return { text: 'Poor', class: styles.scorePoor };
@@ -100,12 +130,53 @@ const getBalancedSummary = (results: AnalysisResult[]): string => {
   return mainResponse.result.credibility_summary;
 };
 
-type TabType = 'overview' | 'evidence' | 'analysis' | 'sources';
+type TabType = 'analysis' | 'evidence' | 'sources' | 'history';
 
 export const AnalysisResults: React.FC<AnalysisResultsProps> = ({ 
-  analysis
+  analysis,
+  selectedProvider,
+  onProviderSelect,
+  onNewAnalysis,
+  isViewingFromRecent = false,
+  pageTitle,
+  onLoadAnalysisForUrl
 }) => {
-  const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [activeTab, setActiveTab] = useState<TabType>('analysis');
+  const [history, setHistory] = useState<Array<{ title: string; url: string; timestamp: number; score?: number; fullAnalysis?: any; pageInfo?: any; failedProviders?: string[] }>>([]);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        console.log('Loading history from storage...');
+        const list = await getStorage('recentAnalyses');
+        console.log('Raw storage data:', list);
+        
+        if (Array.isArray(list)) {
+          const processedHistory = list
+            .slice(0, 10)
+            .map((i: any) => ({
+              title: i.title,
+              url: i.url,
+              timestamp: i.timestamp,
+              score: i.score,
+              fullAnalysis: i.fullAnalysis,
+              pageInfo: i.pageInfo,
+              failedProviders: i.failedProviders || []
+            }));
+          
+          console.log('Processed history:', processedHistory);
+          setHistory(processedHistory);
+        } else {
+          console.log('Storage data is not an array:', typeof list);
+          setHistory([]);
+        }
+      } catch (e) {
+        console.error('Error loading history:', e);
+        setHistory([]);
+      }
+    };
+    load();
+  }, []);
   
   if (!analysis || !Array.isArray(analysis) || analysis.length === 0) {
     return (
@@ -122,101 +193,233 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
   const allEvidence = getAllEvidence(analysis);
   const allLinks = getAllLinks(analysis);
   const scoreCategory = getScoreCategory(averageScore);
-  const balancedSummary = getBalancedSummary(analysis);
+
+  // Debug logging with error handling
+  try {
+    console.log('AnalysisResults - analysis:', analysis);
+    console.log('AnalysisResults - analysis structure check:');
+    analysis.forEach((result, i) => {
+      console.log(`Result ${i}:`, {
+        provider: result.provider,
+        hasResult: !!result.result,
+        hasSupportingLinks: !!result.result?.supporting_links,
+        supportingLinksType: typeof result.result?.supporting_links,
+        supportingLinksLength: result.result?.supporting_links?.length,
+        supportingLinksContent: result.result?.supporting_links
+      });
+    });
+    console.log('AnalysisResults - allLinks:', allLinks);
+    console.log('AnalysisResults - allEvidence:', allEvidence);
+  } catch (e) {
+    console.error('Error in debug logging:', e);
+  }
+
+  // Filter out error messages that aren't actual sources
+  const validSources = allLinks.filter(link => 
+    link && 
+    typeof link === 'string' &&
+    link.trim().length > 0 &&
+    !link.includes('Search timed out') && 
+    !link.includes('Unable to verify') && 
+    !link.includes('Error accessing') &&
+    !link.includes('No verification sources found')
+  );
+  
+  console.log('validSources after filtering:', validSources);
+  console.log('Original allLinks before filtering:', allLinks);
 
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'overview':
-        return (
-          <div className={styles.overviewContent}>
-            <div className={styles.summaryCard}>
-              <p className={styles.summaryText}>{balancedSummary}</p>
-            </div>
-            
-            <div className={styles.quickStats}>
-              <div className={styles.statCard}>
-                <div className={styles.statValue}>{analysis.length}</div>
-                <div className={styles.statLabel}>AI Models</div>
-              </div>
-              <div className={styles.statCard}>
-                <div className={styles.statValue}>{allEvidence.length}</div>
-                <div className={styles.statLabel}>Key Quotes</div>
-              </div>
-              <div className={styles.statCard}>
-                <div className={styles.statValue}>{allLinks.length}</div>
-                <div className={styles.statLabel}>Sources</div>
-              </div>
-              <div className={styles.statCard}>
-                <div className={styles.statValue}>{scoreRange.min}-{scoreRange.max}</div>
-                <div className={styles.statLabel}>Score Range</div>
-              </div>
-            </div>
-          </div>
-        );
-
       case 'evidence':
         return (
           <div className={styles.evidenceList}>
-            {allEvidence.map((evidence, idx) => (
-              <div key={idx} className={`${styles.evidenceCard} ${styles[evidence.sentiment]}`}>
-                <div className={styles.quote}>{evidence.quote}</div>
-                <div className={styles.impact}>{evidence.impact}</div>
-                <div className={styles.providers}>
-                  Cited by: {evidence.providers.join(', ')}
+            {allEvidence.length > 0 ? (
+              allEvidence.map((evidence, idx) => (
+                <div key={idx} className={`${styles.evidenceCard} ${styles[evidence.sentiment]}`}>
+                  <div className={styles.quote}>{evidence.quote}</div>
+                  <div className={styles.impact}>{evidence.impact}</div>
+                  <div className={styles.providers}>
+                    Cited by: {evidence.providers.join(', ')}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p style={{ color: '#5f6368', textAlign: 'center', padding: '40px' }}>
+                No evidence available.
+              </p>
+            )}
           </div>
         );
 
       case 'analysis':
         return (
           <div className={styles.analysisContent}>
-            {analysis.map((result, idx) => (
-              <div key={idx} className={styles.aiCard}>
-                <div className={styles.aiHeader}>
-                  <div className={styles.aiName}>{result.provider}</div>
-                  <div className={styles.aiScore}>{result.result.credibility_score}/100</div>
-                </div>
-                <div className={styles.aiContent}>
-                  <p className={styles.aiReasoning}>
-                    {result.result.reasoning || 'No detailed reasoning available'}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        );
-
-      case 'sources':
-        return (
-          <div className={styles.sourcesList}>
-            {allLinks.length > 0 ? (
-              allLinks.map((link, idx) => (
-                <div key={idx} className={styles.sourceCard}>
-                  {link.startsWith('http') ? (
-                    <a 
-                      href="#"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        window.open(link, '_blank');
-                      }}
-                      className={styles.sourceLink}
-                    >
-                      {link}
-                    </a>
-                  ) : (
-                    <span className={styles.sourceLink}>{link}</span>
-                  )}
+            {analysis.length > 0 ? (
+              analysis.map((result, idx) => (
+                <div key={idx} className={styles.aiCard}>
+                  <div className={styles.aiHeader}>
+                    <div className={styles.aiName}>{result.provider}</div>
+                    <div className={styles.aiScore}>{result.result.credibility_score}/100</div>
+                  </div>
+                  <div className={styles.aiContent}>
+                    <p className={styles.aiReasoning}>
+                      {result.result.reasoning || 'No detailed reasoning available'}
+                    </p>
+                  </div>
                 </div>
               ))
             ) : (
               <p style={{ color: '#5f6368', textAlign: 'center', padding: '40px' }}>
-                No sources available for verification.
+                No analysis available.
               </p>
             )}
           </div>
         );
+
+      case 'sources':
+        try {
+          console.log('Related tab - validSources:', validSources);
+          console.log('Related tab - allLinks:', allLinks);
+          return (
+            <div className={styles.sourcesList}>
+              {validSources.length > 0 ? (
+              validSources.map((link, idx) => {
+                // Extract domain for display
+                let domain = '';
+                try { 
+                  domain = new URL(link).hostname.replace(/^www\./, ''); 
+                } catch {}
+                
+                // Determine source quality indicator
+                const getQualityIndicator = (url: string) => {
+                  const urlLower = url.toLowerCase();
+                  if (urlLower.includes('factcheck.org') || urlLower.includes('snopes.com') || urlLower.includes('politifact.com')) {
+                    return { text: 'Fact Check', class: styles.sourceFactCheck };
+                  }
+                  if (urlLower.includes('reuters.com') || urlLower.includes('ap.org') || urlLower.includes('bbc.com')) {
+                    return { text: 'News', class: styles.sourceNews };
+                  }
+                  if (urlLower.includes('.edu') || urlLower.includes('researchgate.net')) {
+                    return { text: 'Academic', class: styles.sourceAcademic };
+                  }
+                  if (urlLower.includes('.gov')) {
+                    return { text: 'Government', class: styles.sourceGovernment };
+                  }
+                  return { text: 'Source', class: styles.sourceGeneral };
+                };
+                
+                const quality = getQualityIndicator(link);
+                
+                return (
+                  <div key={idx} className={styles.sourceCard}>
+                    <div className={styles.sourceHeader}>
+                      <span className={quality.class}>{quality.text}</span>
+                      {domain && <span className={styles.sourceDomain}>{domain}</span>}
+                    </div>
+                    <a 
+                      href={link}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={styles.sourceLink}
+                      title="Click to open in new tab"
+                    >
+                      {link}
+                    </a>
+                    <div className={styles.sourceContext}>
+                      <span className={styles.sourceContextText}>
+                        Related article for verification
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <p style={{ color: '#5f6368', textAlign: 'center', padding: '40px' }}>
+                No related articles found.
+              </p>
+            )}
+          </div>
+        );
+        } catch (e) {
+          console.error('Error in sources tab:', e);
+          return (
+            <div className={styles.sourcesList}>
+              <p style={{ color: '#d93025', textAlign: 'center', padding: '40px' }}>
+                Error loading related articles.
+              </p>
+            </div>
+          );
+        }
+
+      case 'history':
+        try {
+          console.log('History tab - history array:', history);
+          console.log('History tab - history length:', history.length);
+          return (
+          <div className={styles.historyList}>
+            {history.length === 0 ? (
+              <p style={{ color: '#5f6368', textAlign: 'center', padding: '40px' }}>
+                No previous analyses yet.
+              </p>
+            ) : (
+              history.map((h, idx) => {
+                const formatRelativeTime = (ts: number) => {
+                  const diff = Date.now() - ts;
+                  const mins = Math.floor(diff / 60000);
+                  if (mins < 1) return 'just now';
+                  if (mins < 60) return `${mins}m ago`;
+                  const hrs = Math.floor(mins / 60);
+                  if (hrs < 24) return `${hrs}h ago`;
+                  const days = Math.floor(hrs / 24);
+                  if (days < 7) return `${days}d ago`;
+                  return new Date(ts).toLocaleDateString();
+                };
+
+                let hostname = '';
+                try { hostname = new URL(h.url).hostname.replace(/^www\./, ''); } catch {}
+
+                return (
+                  <div key={`${h.url}-${h.timestamp}-${idx}`} className={styles.historyItem}>
+                    <div className={styles.historyMain}>
+                      <button
+                        className={styles.historyTitle}
+                        title={h.title}
+                        onClick={() => {
+                          // Use the loadAnalysisForUrl function passed as prop
+                          if (onLoadAnalysisForUrl) {
+                            onLoadAnalysisForUrl(h.url, h.timestamp);
+                          } else {
+                            // Fallback: open in new tab
+                            window.open(h.url, '_blank');
+                          }
+                        }}
+                      >
+                        {h.title}
+                      </button>
+                      {typeof h.score === 'number' && (
+                        <span className={styles.historyScore}>{h.score}</span>
+                      )}
+                    </div>
+                    <div className={styles.historyMeta}>
+                      {hostname && <span className={styles.historyDomain}>{hostname}</span>}
+                      <span>• {formatRelativeTime(h.timestamp)}</span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        );
+        } catch (e) {
+          console.error('Error in history tab:', e);
+          return (
+            <div className={styles.historyList}>
+              <p style={{ color: '#d93025', textAlign: 'center', padding: '40px' }}>
+                Error loading history.
+              </p>
+            </div>
+          );
+        }
 
       default:
         return null;
@@ -225,52 +428,92 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
 
   return (
     <div className={styles.container}>
-      {/* Left Side - Score Display */}
+      {/* Hero Score Section - Top Center */}
       <div className={`${styles.scoreSection} ${scoreCategory.class}`}>
-        <div 
-          className={styles.scoreRing}
-          style={{
-            '--score-percentage': averageScore
-          } as React.CSSProperties}
-        >
-          <div className={styles.scoreValue}>{averageScore}</div>
-        </div>
+        {averageScore >= 5 ? (
+          <div 
+            className={styles.scoreRing}
+            style={{
+              '--score-percentage': averageScore
+            } as React.CSSProperties}
+          >
+            <div className={styles.scoreValue}>{averageScore}</div>
+          </div>
+        ) : (
+          <div className={styles.scoreRingEmpty}>
+            <div className={styles.scoreValueEmpty}>{averageScore}</div>
+          </div>
+        )}
         <div className={styles.scoreLabel}>{scoreCategory.text}</div>
         <div className={styles.scoreRange}>Range: {scoreRange.min}-{scoreRange.max}</div>
+        {pageTitle && <div className={styles.pageTitle}>{pageTitle}</div>}
       </div>
 
-      {/* Right Side - Navigation & Content */}
+      {/* Horizontal Stats Bar */}
+      <div className={styles.statsBar}>
+        <div className={styles.statItem}>
+          <div className={styles.statValue}>{analysis.length}</div>
+          <div className={styles.statLabel}>AI Models</div>
+        </div>
+        <div className={styles.statItem}>
+          <div className={styles.statValue}>{allEvidence.length}</div>
+          <div className={styles.statLabel}>Key Quotes</div>
+        </div>
+        <div className={styles.statItem}>
+          <div className={styles.statValue}>{validSources.length}</div>
+          <div className={styles.statLabel}>{validSources.length === 1 ? 'Related' : 'Related'}</div>
+        </div>
+        <div className={styles.statItem}>
+          <div className={styles.statValue}>{scoreRange.min}-{scoreRange.max}</div>
+          <div className={styles.statLabel}>Score Range</div>
+        </div>
+      </div>
+
+      {/* Main Content Section */}
       <div className={styles.mainSection}>
         <div className={styles.navigation}>
           <button 
-            className={`${styles.navTab} ${activeTab === 'overview' ? styles.active : ''}`}
-            onClick={() => setActiveTab('overview')}
+            className={`${styles.navTab} ${activeTab === 'analysis' ? styles.active : ''}`}
+            onClick={() => setActiveTab('analysis')}
           >
-            Overview
+            Analysis
           </button>
           <button 
             className={`${styles.navTab} ${activeTab === 'evidence' ? styles.active : ''}`}
             onClick={() => setActiveTab('evidence')}
           >
-            Evidence ({allEvidence.length})
-          </button>
-          <button 
-            className={`${styles.navTab} ${activeTab === 'analysis' ? styles.active : ''}`}
-            onClick={() => setActiveTab('analysis')}
-          >
-            Analysis ({analysis.length})
+            Evidence
           </button>
           <button 
             className={`${styles.navTab} ${activeTab === 'sources' ? styles.active : ''}`}
             onClick={() => setActiveTab('sources')}
           >
-            Sources ({allLinks.length})
+            Related
+          </button>
+          <button 
+            className={`${styles.navTab} ${activeTab === 'history' ? styles.active : ''}`}
+            onClick={() => setActiveTab('history')}
+          >
+            History
           </button>
         </div>
 
         <div className={styles.contentArea}>
           {renderTabContent()}
         </div>
+      </div>
+
+      {/* Done Button */}
+      <div className={styles.fixedAnalyzeButton}>
+        <button 
+          className={styles.analyzeButton} 
+          onClick={() => {
+            console.log('DONE button clicked, isViewingFromRecent:', isViewingFromRecent);
+            onNewAnalysis();
+          }}
+        >
+          {'Done'}
+        </button>
       </div>
     </div>
   );

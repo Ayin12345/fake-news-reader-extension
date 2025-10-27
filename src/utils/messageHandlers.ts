@@ -1,0 +1,526 @@
+// Message handlers for background script
+import { fetchOpenAI, fetchGemini } from './aiHandling';
+import { performWebSearch } from './webSearch';
+import { 
+  saveTabState, 
+  getTabState, 
+  deleteTabState, 
+  getDefaultState,
+  getUrlAnalysis,
+  setUrlAnalysis,
+  isTabBeingSetup,
+  markTabAsBeingSetup,
+  unmarkTabAsBeingSetup
+} from './tabState';
+import { processAnalysisResults } from './analysisProcessor';
+
+export async function handleGetPageInfo(message: any, sender: any, sendResponse: (response: any) => void) {
+  try {
+    const tabId = message.tabId || sender.tab?.id;
+    if (!tabId) {
+      sendResponse({ success: false, error: 'No tab ID found' });
+      return;
+    }
+
+    const pageInfo = await chrome.tabs.sendMessage(tabId, { type: 'GET_PAGE_CONTENT' });
+    if (pageInfo && pageInfo.error) {
+      sendResponse({ success: false, error: pageInfo.error });
+      return;
+    }
+
+    // Get or create state for this tab
+    let state = await getTabState(tabId) || getDefaultState();
+    
+    // Update state with new page info, but preserve existing analysis if page is the same
+    const isSamePage = state.pageInfo?.url === pageInfo.data.url;
+    
+    state = {
+      ...state,
+      pageInfo: pageInfo.data,
+      showButton: true,
+      analysis: isSamePage ? state.analysis : [],
+      failedProviders: isSamePage ? state.failedProviders : [],
+      hasAttemptedAnalysis: false
+    };
+    
+    await saveTabState(tabId, state);
+    sendResponse({ success: true, data: pageInfo.data });
+  } catch (error) {
+    console.error('Error getting page info:', error);
+    sendResponse({ success: false, error: 'Failed to fetch page info' });
+  }
+}
+
+export async function handleAnalyzeArticle(message: any, sender: any, sendResponse: (response: any) => void) {
+  try {
+    console.log('[NewsScan] handleAnalyzeArticle called with:', message);
+    const tabId = message.tabId;
+    if (!tabId) {
+      sendResponse({ success: false, error: 'No tab ID provided' });
+      return;
+    }
+
+    const providers = message.providers || [];
+    console.log('[NewsScan] Providers to use:', providers);
+    
+    // Set analyzing state for this tab
+    let currentState = await getTabState(tabId) || getDefaultState();
+    currentState.isAnalyzing = true;
+    await saveTabState(tabId, currentState);
+    
+    // Create individual promises that send updates as they complete
+    const providerPromises = providers.map(async (provider: string) => {
+      try {
+        let result;
+        switch (provider) {
+          case 'OpenAI':
+            result = await fetchOpenAI(message.content, import.meta.env.VITE_OPENAI_API_KEY || '');
+            break;
+          case 'Gemini':
+            result = await fetchGemini(message.content, import.meta.env.VITE_GEMINI_API_KEY || '');
+            break;
+          default:
+            throw new Error(`Unknown provider: ${provider}`);
+        }
+        
+        // Send success update immediately
+        chrome.runtime.sendMessage({
+          type: 'PROVIDER_UPDATE',
+          provider: provider,
+          status: 'complete'
+        });
+        
+        return result;
+      } catch (error) {
+        console.error(`Error in provider ${provider}:`, error);
+        
+        const errorMessage = error instanceof Error ? error.message : 'Provider failed';
+        
+        // Send failure update immediately with error details
+        chrome.runtime.sendMessage({
+          type: 'PROVIDER_UPDATE',
+          provider: provider,
+          status: 'failed',
+          error: errorMessage
+        });
+        
+        // Update tab state to reflect error
+        let currentState = await getTabState(tabId);
+        if (currentState) {
+          const updatedState = {
+            ...currentState,
+            error: errorMessage,
+            isAnalyzing: false
+          };
+          await saveTabState(tabId, updatedState);
+        }
+        
+        throw error;
+      }
+    });
+
+    const results = await Promise.allSettled(providerPromises);
+
+    // Process results
+    const { successfulResults, failedProviders } = processAnalysisResults(results, providers);
+
+    // Update tab state with analysis results
+    let state = await getTabState(tabId);
+    if (!state) {
+      console.warn('No existing tab state found during analysis');
+      state = getDefaultState();
+    }
+    
+    state.analysis = successfulResults;
+    state.failedProviders = failedProviders;
+    state.showButton = false;
+    state.isAnalyzing = false;
+    state.hasAttemptedAnalysis = true;
+    
+    await saveTabState(tabId, state);
+    
+    sendResponse({
+      success: true,
+      data: {
+        successfulResults,
+        failedProviders
+      },
+      providers: providers
+    });
+  } catch (error) {
+    console.error('Error in analyze article:', error);
+    sendResponse({ success: false, error: 'Failed to analyze article' });
+  }
+}
+
+export async function handleGetTabState(message: any, sender: any, sendResponse: (response: any) => void) {
+  try {
+    const tabId = message.tabId || sender.tab?.id;
+    if (!tabId) {
+      sendResponse({ success: false, error: 'No tab ID found' });
+      return;
+    }
+
+    // If URL is provided, search for existing analysis for that URL
+    if (message.url) {
+      // First check URL-based storage
+      const urlAnalysis = getUrlAnalysis(message.url);
+      
+      if (urlAnalysis) {
+        const state = {
+          pageInfo: urlAnalysis.pageInfo,
+          analysis: urlAnalysis.analysis,
+          failedProviders: urlAnalysis.failedProviders,
+          showButton: false,
+          isAnalyzing: false,
+          hasAttemptedAnalysis: true,
+          isViewingFromRecent: true,
+          originalTabId: undefined
+        };
+        
+        // Save this state for the current tab
+        await saveTabState(tabId, state);
+        sendResponse({ success: true, data: state });
+        return;
+      }
+      
+      // Fallback: search through all tab states to find analysis for this URL
+      const tabStatesData = await chrome.storage.local.get('tabStates');
+      const tabStatesObj = tabStatesData.tabStates || {};
+      
+      for (const [tId, state] of Object.entries(tabStatesObj)) {
+        const tabState = state as any;
+        if (tabState.pageInfo?.url === message.url && tabState.analysis && tabState.analysis.length > 0) {
+          sendResponse({ success: true, data: tabState });
+          return;
+        }
+      }
+      
+      // No existing analysis found for this URL
+      sendResponse({ success: true, data: getDefaultState() });
+      return;
+    }
+    
+    // Otherwise, get state for the current tab
+    const state = await getTabState(tabId) || getDefaultState();
+    sendResponse({ success: true, data: state });
+  } catch (error) {
+    console.error('Error in GET_TAB_STATE:', error);
+    sendResponse({ success: false, error: 'Failed to get tab state' });
+  }
+}
+
+export async function handleResetTabState(message: any, sender: any, sendResponse: (response: any) => void) {
+  try {
+    const tabId = message.tabId || sender.tab?.id;
+    if (!tabId) {
+      sendResponse({ success: false, error: 'No tab ID found' });
+      return;
+    }
+
+    // Clear the state completely
+    await deleteTabState(tabId);
+    
+    // Initialize with default state
+    const defaultState = getDefaultState();
+    await saveTabState(tabId, defaultState);
+    
+    // Notify other instances of the sidepanel about the reset
+    chrome.tabs.sendMessage(tabId, {
+      type: 'TAB_SWITCHED',
+      state: defaultState
+    }).catch(() => {
+      // Ignore errors if content script isn't ready
+    });
+    
+    sendResponse({ success: true });
+  } catch (error) {
+    console.error('Error resetting tab state:', error);
+    sendResponse({ success: false, error: 'Failed to reset tab state' });
+  }
+}
+
+export async function handleSaveTabState(message: any, sender: any, sendResponse: (response: any) => void) {
+  try {
+    const tabId = message.tabId || sender.tab?.id;
+    if (!tabId) {
+      sendResponse({ success: false, error: 'No tab ID available to save state' });
+      return;
+    }
+
+    // Save the provided state for this tab
+    await saveTabState(tabId, {
+      pageInfo: message.data.pageInfo,
+      analysis: message.data.analysis,
+      failedProviders: message.data.failedProviders,
+      showButton: message.data.showButton,
+      isAnalyzing: message.data.isAnalyzing || false,
+      hasAttemptedAnalysis: message.data.hasAttemptedAnalysis || false,
+      isViewingFromRecent: message.data.isViewingFromRecent || false,
+      originalTabId: message.data.originalTabId
+    });
+    
+    // Also save to URL-based storage if we have analysis
+    if (message.data.pageInfo?.url && message.data.analysis && message.data.analysis.length > 0) {
+      setUrlAnalysis(message.data.pageInfo.url, {
+        pageInfo: message.data.pageInfo,
+        analysis: message.data.analysis,
+        failedProviders: message.data.failedProviders,
+        timestamp: Date.now()
+      });
+    }
+    
+    sendResponse({ success: true });
+  } catch (error) {
+    sendResponse({ success: false, error: 'Failed to save tab state' });
+  }
+}
+
+export async function handleWebSearch(message: any, sender: any, sendResponse: (response: any) => void) {
+  try {
+    // Combine the query with the original URL to extract year information
+    const searchQuery = message.originalUrl ? `${message.query} ${message.originalUrl}` : message.query;
+    
+    const results = await performWebSearch(searchQuery, message.max_results);
+    sendResponse({ 
+      success: true, 
+      data: { results } 
+    });
+  } catch (error) {
+    console.error('Web search error:', error);
+    sendResponse({ 
+      success: false, 
+      error: 'Failed to perform web search' 
+    });
+  }
+}
+
+export async function handleLoadAnalysisInTab(message: any, sender: any, sendResponse: (response: any) => void) {
+  try {
+    const tabId = message.tabId;
+    const analysisData = message.analysisData;
+
+    console.log('🔄 LOAD_ANALYSIS_IN_TAB called for tab:', tabId);
+    console.log('📄 Analysis data received:', {
+      hasPageInfo: !!analysisData.pageInfo,
+      hasAnalysis: !!analysisData.analysis,
+      analysisLength: analysisData.analysis?.length || 0,
+      isViewingFromRecent: analysisData.isViewingFromRecent
+    });
+
+    // Prevent double execution
+    if (isTabBeingSetup(tabId)) {
+      console.log('⚠️ Tab already being set up, skipping');
+      sendResponse({ success: false, error: 'Tab already being set up' });
+      return;
+    }
+    
+    // Mark this tab as being set up
+    markTabAsBeingSetup(tabId);
+
+    // Store the analysis data for this tab
+    const newState = {
+      pageInfo: analysisData.pageInfo,
+      analysis: analysisData.analysis,
+      failedProviders: analysisData.failedProviders,
+      showButton: false,
+      isAnalyzing: false,
+      hasAttemptedAnalysis: true,
+      isViewingFromRecent: analysisData.isViewingFromRecent || false,
+      originalTabId: analysisData.originalTabId
+    };
+    
+    await saveTabState(tabId, newState);
+
+    // Also store in URL-based storage
+    if (analysisData.pageInfo?.url) {
+      setUrlAnalysis(analysisData.pageInfo.url, {
+        pageInfo: analysisData.pageInfo,
+        analysis: analysisData.analysis,
+        failedProviders: analysisData.failedProviders,
+        timestamp: Date.now()
+      });
+    }
+
+    // Mark this tab as having pre-loaded analysis to prevent interference
+    await saveTabState(tabId, {
+      ...newState,
+      hasPreloadedAnalysis: true
+    });
+
+    // Wait for page to load, then inject content script and open sidebar in one step
+    setTimeout(async () => {
+      try {
+        // Check if content script is already injected
+        try {
+          await chrome.tabs.sendMessage(tabId, { type: 'FNR_PING' });
+        } catch (error) {
+          // Inject content script first
+          await chrome.scripting.executeScript({
+            target: { tabId: tabId },
+            files: ['content-scripts/content.js'],
+          });
+        }
+        
+        // Small delay to ensure content script is ready, then open sidebar
+        setTimeout(async () => {
+          try {
+            // Check if tab still exists before sending message
+            const tab = await chrome.tabs.get(tabId);
+            if (!tab) {
+              unmarkTabAsBeingSetup(tabId);
+              sendResponse({ success: false, error: 'Tab no longer exists' });
+              return;
+            }
+            
+            // Check if this is a history view - if so, we SHOULD open the sidebar
+            if (newState.isViewingFromRecent) {
+              console.log('🔄 Sending preloaded analysis to content script for history view');
+              console.log('📄 Preloaded analysis data:', {
+                hasAnalysis: !!newState.analysis,
+                analysisLength: newState.analysis?.length || 0,
+                hasPageInfo: !!newState.pageInfo,
+                isViewingFromRecent: newState.isViewingFromRecent
+              });
+              console.log('📤 Sending TOGGLE_INJECTED_SIDEBAR message to tab:', tabId);
+              
+              chrome.tabs.sendMessage(tabId, { 
+                type: 'TOGGLE_INJECTED_SIDEBAR',
+                keepOpen: true,
+                preloadedAnalysis: newState,
+                hasPreloadedAnalysis: true
+              }, (response) => {
+                if (chrome.runtime.lastError) {
+                  unmarkTabAsBeingSetup(tabId);
+                  sendResponse({ success: false, error: chrome.runtime.lastError.message });
+                  return;
+                }
+                unmarkTabAsBeingSetup(tabId);
+                sendResponse({ success: true });
+              });
+            } else {
+              // Just save the analysis data without opening sidebar
+              sendResponse({ success: true });
+              unmarkTabAsBeingSetup(tabId);
+            }
+          } catch (error) {
+            unmarkTabAsBeingSetup(tabId);
+            sendResponse({ success: false, error: 'Failed to open sidebar' });
+          }
+        }, 200);
+      } catch (err) {
+        console.error('Error setting up analysis tab:', err);
+        unmarkTabAsBeingSetup(tabId);
+        sendResponse({ success: false, error: 'Failed to setup analysis tab' });
+      }
+    }, 1000);
+  } catch (error) {
+    console.error('Error in LOAD_ANALYSIS_IN_TAB:', error);
+    if (message.tabId) {
+      unmarkTabAsBeingSetup(message.tabId);
+    }
+    sendResponse({ success: false, error: 'Failed to load analysis in tab' });
+  }
+}
+
+export async function handleNavigateAndReopenSidebar(message: any, sender: any, sendResponse: (response: any) => void) {
+  try {
+    // Create a new tab with the URL
+    const newTab = await chrome.tabs.create({ url: message.url });
+    if (!newTab.id) {
+      sendResponse({ success: false, error: 'Failed to create new tab' });
+      return;
+    }
+
+    const tabId = newTab.id;
+
+    // Wait for page to load, then inject content script and open sidebar
+    setTimeout(async () => {
+      try {
+        // Inject content script
+        await chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          files: ['content-scripts/content.js'],
+        });
+        
+        // Wait for content script to be ready
+        const waitForContentScript = () => {
+          return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error('Content script not ready after 5 seconds'));
+            }, 5000);
+            
+            chrome.tabs.sendMessage(tabId, { type: 'FNR_PING' }, (response) => {
+              clearTimeout(timeout);
+              if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+              } else if (response?.ok) {
+                resolve(true);
+              } else {
+                reject(new Error('Content script not responding'));
+              }
+            });
+          });
+        };
+        
+        await waitForContentScript();
+        sendResponse({ success: true });
+      } catch (err) {
+        console.error('Error in sidebar setup:', err);
+        sendResponse({ success: false, error: err instanceof Error ? err.message : 'Unknown error' });
+      }
+    }, 1000);
+  } catch (error) {
+    console.error('Error in NAVIGATE_AND_REOPEN_SIDEBAR:', error);
+    sendResponse({ success: false, error: 'Navigation failed' });
+  }
+}
+
+export async function handlePreloadUrlAnalysis(message: any, sender: any, sendResponse: (response: any) => void) {
+  try {
+    const { url, pageInfo, analysis, failedProviders } = message;
+    if (!url || !analysis || analysis.length === 0) {
+      sendResponse({ success: false, error: 'Missing url or analysis' });
+      return;
+    }
+    
+    // Store in URL-based storage
+    setUrlAnalysis(url, {
+      pageInfo: pageInfo,
+      analysis: analysis,
+      failedProviders: failedProviders || [],
+      timestamp: Date.now(),
+    });
+    
+    // Also store in recent analyses for history
+    const recentData = await chrome.storage.local.get('recentAnalyses');
+    const recentList = recentData.recentAnalyses || [];
+    
+    // Update existing entry or add new one
+    const existingIndex = recentList.findIndex((item: any) => item.url === url);
+    const historyEntry = {
+      title: pageInfo.title || 'Unknown Title',
+      url: url,
+      timestamp: Date.now(),
+      score: analysis[0]?.result?.credibility_score || null,
+      fullAnalysis: analysis,
+      pageInfo: pageInfo,
+      failedProviders: failedProviders || []
+    };
+    
+    if (existingIndex >= 0) {
+      recentList[existingIndex] = historyEntry;
+    } else {
+      recentList.unshift(historyEntry);
+    }
+    
+    // Keep only last 50 entries
+    const trimmedList = recentList.slice(0, 50);
+    await chrome.storage.local.set({ recentAnalyses: trimmedList });
+    
+    sendResponse({ success: true });
+  } catch (error) {
+    console.error('Error in PRELOAD_URL_ANALYSIS:', error);
+    sendResponse({ success: false, error: 'Failed to preload analysis' });
+  }
+}

@@ -1,4 +1,4 @@
-/* Global scrollbar hiding */
+/* Global csrollbar hiding */
 :global(*) {
   scrollbar-width: none !important;
   -ms-overflow-style: none !important;
@@ -15,45 +15,16 @@
 .container {
   width: 100%;
   height: 100vh;
-  background-color: #ffffff;
+  background-color: #f5f5f5; /* Loading background to prevent white flash */
   display: flex;
   flex-direction: column;
-  border-radius: 0 0 8px 8px; /* Only round bottom corners */
+  border-radius: 0;
   overflow: hidden;
-  position: relative; /* Ensure it takes up full width */
-  left: 0;
-  right: 0;
-}
-
-.header {
-  width: 100%;
-  padding: 16px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid #e0e0e0;
-  background: #ffffff;
-}
-
-.headerButtons {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.resetButton {
-  padding: 6px 8px;
-  background-color: #f1f3f4;
-  color: #5f6368;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: background-color 0.2s;
-}
-
-.resetButton:hover {
-  background-color: #e8eaed;
+  position: relative;
+  margin: 0;
+  padding: 0;
+  /* Force layout recalculation when container becomes visible */
+  contain: layout style;
 }
 
 .title {
@@ -66,7 +37,7 @@
 .content {
   flex: 1;
   padding: 20px;
-  padding-bottom: calc(20px + 70px); /* Account for fixed analyze button */
+  padding-bottom: calc(20px + 100px); /* More space so bottom content isn't clipped */
   overflow-y: auto;
   width: 100%;
   display: flex;
@@ -83,26 +54,47 @@
 }
 
 .button {
-  padding: 8px 16px;
-  background-color: #1a73e8;
-  color: white;
-  border: none;
-  border-radius: 4px;
+  padding: 8px 12px;
+  background-color: #f8f9fa;
+  color: #5f6368;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
-  transition: background-color 0.2s;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .button:hover {
+  background-color: #e8eaed;
+  border-color: #c4c7c5;
+  color: #202124;
+}
+
+.button[aria-pressed="true"] {
+  background-color: #1a73e8;
+  color: white;
+  border-color: #1a73e8;
+}
+
+.button[aria-pressed="true"]:hover {
   background-color: #1557b0;
+  border-color: #1557b0;
+  color: white;
 }
 
 .pageTitle {
-  font-size: 15px;
+  font-size: 18px;
+  font-weight: 600;
   color: #202124;
-  margin: 0 0 16px 0;
-  padding-bottom: 12px;
+  margin: 0 0 20px 0;
+  padding: 0 0 16px 0;
   border-bottom: 1px solid #e0e0e0;
+  line-height: 1.4;
 }
 
 .analyzeButton {
@@ -206,6 +198,66 @@
   border-color: #c4c7c5;
 }
 
+/* Modern Error State - Similar to Loading Screen */
+.analysisErrorState {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, #fff5f5 0%, #fef2f2 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 40px 20px 120px;
+}
+
+.analysisErrorContent {
+  text-align: center;
+  max-width: 280px;
+}
+
+.analysisErrorTitle {
+  font-size: 30px;
+  font-weight: 600;
+  color: #dc2626;
+  margin-bottom: 15px;
+  animation: fadeInUp 0.6s ease-out;
+}
+
+.analysisErrorSubtitle {
+  font-size: 14px;
+  color: #6b7280;
+  margin-bottom: 32px;
+  animation: fadeInUp 0.6s ease-out 0.2s both;
+}
+
+
+
+.errorActionButton {
+  padding: 12px 24px;
+  background-color: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  animation: fadeInUp 0.6s ease-out 0.3s both;
+}
+
+.errorActionButton:hover {
+  background-color: #b91c1c;
+  transform: translateY(-1px);
+}
+
+.errorActionButton:active {
+  transform: translateY(0);
+}
+
 /* Modern Analysis Loading State */
 .analysisLoadingState {
   position: fixed;
@@ -219,7 +271,7 @@
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  padding: 40px 20px;
+  padding: 40px 20px 120px; /* keep loading UI away from bottom button area */
 }
 
 .analysisLoadingContent {
@@ -559,42 +611,158 @@
   background-image: 
     linear-gradient(135deg, rgba(245, 247, 255, 0.97) 0%, rgba(232, 234, 253, 0.97) 100%),
     url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%231a73e8' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
-  padding: 1.5rem 2rem;
+  padding: 2.5rem 2rem;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   overflow: hidden;
-  padding-bottom: calc(1.5rem + 70px); /* Adjusted padding for the fixed button */
+  padding-bottom: calc(2.5rem + 70px);
+  justify-content: space-between;
+}
+
+/* Compact recent list used in place of feature cards when history exists */
+.recentCompactList {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 0.5rem;
+}
+
+.recentCompactHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.recentCompactTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #202124;
+}
+
+.recentCompactScroll {
+  max-height: 420px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 2px; /* avoid content bump when scrollbar hidden */
+}
+
+.recentCompactItem {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color 0.15s ease;
+  margin-bottom: 8px;
+}
+
+.recentCompactItem:hover {
+  border-color: #d1d5db;
+}
+
+.recentCompactMain {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.recentCompactName {
+  font-size: 15px;
+  color: #1a73e8;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+  margin: 0;
+  transition: color 0.15s ease;
+  line-height: 1.4;
+  position: relative;
+}
+
+.recentCompactName:hover {
+  color: #1557b0;
+}
+
+.recentCompactName:hover::after {
+  content: attr(title);
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  background: #374151;
+  color: white;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 1000;
+  margin-bottom: 6px;
+  font-weight: 400;
+  opacity: 0.95;
+}
+
+.recentCompactMeta {
+  font-size: 12px;
+  color: #6b7280;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recentCompactDate {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.recentCompactScore {
+  background: #eef2ff;
+  color: #1d4ed8;
+  border-radius: 9999px;
+  padding: 2px 8px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.recentCompactActions {
+  display: flex;
+  gap: 8px;
 }
 
 .logoSection {
-  margin: 2rem 0;
-  /* Removed animation */
-}
-
-.logo {
-  width: 80px;
-  height: auto;
-  margin-bottom: 0.5rem;
-  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1));
+  margin: 3rem 0 2.5rem 0;
+  text-align: center;
 }
 
 .tagline {
-  font-size: 1.2rem;
+  font-size: 1.5rem;
   color: #1a2b4e;
-  margin-bottom: 1rem;
-  font-weight: 500;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-  line-height: 1.4;
+  margin: 0;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
 }
 
 .welcomeDescription {
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   color: #4a5568;
   max-width: 600px;
-  margin: 0 auto 1rem;
-  line-height: 1.4;
+  margin: 0 auto 3rem;
+  line-height: 1.5;
   padding: 0 1rem;
 }
 
@@ -606,6 +774,50 @@
   max-width: 800px;
   margin: 1rem 0;
   padding: 0 0.5rem;
+}
+.recentPanel {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  background: rgba(255,255,255,0.85);
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(17, 24, 39, 0.06);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  min-height: clamp(320px, 52vh, 600px);
+}
+
+.recentPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.recentPanelTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #202124;
+}
+
+.recentCompactList {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.recentCompactScroll {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
 }
 
 .featureCard {
@@ -656,7 +868,7 @@
 .welcomeFooter {
   font-size: 0.75rem;
   color: #666;
-  margin-top: 1rem;
+  margin-top: auto;
   padding: 0 1rem;
   text-align: center;
   line-height: 1.4;
@@ -711,3 +923,202 @@
     transform: scale(1);
   }
 } 
+
+/* Dashboard styles for returning users */
+.dashboardHeader {
+  text-align: center;
+  margin-bottom: 24px;
+  padding: 20px 0;
+}
+
+.dashboardTitle {
+  font-size: 18px;
+  font-weight: 600;
+  color: #202124;
+  margin: 0 0 8px 0;
+}
+
+.dashboardSubtitle {
+  font-size: 14px;
+  color: #5f6368;
+  margin: 0;
+  line-height: 1.4;
+}
+
+.emptyState {
+  text-align: center;
+  padding: 60px 20px;
+  color: #5f6368;
+}
+
+.emptyIcon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.6;
+}
+
+.emptyTitle {
+  font-size: 16px;
+  font-weight: 500;
+  color: #202124;
+  margin: 0 0 8px 0;
+}
+
+.emptyDescription {
+  font-size: 14px;
+  color: #5f6368;
+  margin: 0;
+  line-height: 1.4;
+  max-width: 280px;
+  margin: 0 auto;
+}
+
+/* Remove unused navigation styles */
+.wxrNav,
+.wxrNavButton,
+.collapseButton {
+  display: none;
+} 
+
+/* React in-app toolbar */
+.toolbar {
+  width: 100%;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  border-bottom: 1px solid #e0e0e0;
+  background: #ffffff;
+}
+
+.toolbarButtons {
+  display: flex;
+  gap: 8px;
+}
+
+.toolbarButton {
+  padding: 8px 12px;
+  background-color: #1a73e8;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 0.2s ease;
+}
+
+.toolbarButton:hover {
+  background-color: #1557b0;
+}
+
+.toolbarIconButton {
+  padding: 8px 10px;
+  background-color: #f8f9fa;
+  color: #5f6368;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+}
+
+.toolbarIconButton:hover {
+  background: #e8eaed;
+  border-color: #c4c7c5;
+  color: #202124;
+} 
+
+/* Recent analyses dashboard */
+.recentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+
+
+
+
+.recentTitleRow {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.recentTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 4px 0;
+}
+
+.recentLink {
+  color: #1a73e8;
+  text-decoration: none;
+}
+.recentLink:hover { text-decoration: underline; }
+
+.recentMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #6b7280;
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.scoreBadge {
+  background: #eef2ff;
+  color: #1d4ed8;
+  border-radius: 9999px;
+  padding: 4px 10px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.recentSummary {
+  color: #374151;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 12px 0;
+}
+
+.recentActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.recentActionPrimary {
+  padding: 8px 12px;
+  background-color: #1a73e8;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.2s ease;
+}
+.recentActionPrimary:hover { background: #1557b0; }
+
+.recentActionSecondary {
+  padding: 8px 12px;
+  background-color: #f8f9fa;
+  color: #374151;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+.recentActionSecondary:hover { background: #e8eaed; border-color: #c4c7c5; } 
