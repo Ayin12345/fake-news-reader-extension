@@ -1,26 +1,5 @@
 // Analysis helper functions and utilities
 
-export function createTimerFunctions(timersRef: React.MutableRefObject<Record<string, number>>) {
-  const startTimer = (label: string) => {
-    timersRef.current[label] = Date.now();
-    console.log(`[FNR][TIMER][START] ${label}`);
-  };
-
-  const endTimer = (label: string) => {
-    const t = timersRef.current[label];
-    if (t) {
-      const ms = Date.now() - t;
-      console.log(`[FNR][TIMER][END] ${label} = ${ms}ms`);
-      delete timersRef.current[label];
-    } else {
-      console.log(`[FNR][TIMER][END] ${label} (no start)`);
-    }
-  };
-
-  return { startTimer, endTimer };
-}
-
-
 export function shouldSkipAutoAnalysis(
   isManualTrigger: boolean,
   isViewingFromRecent: boolean,
@@ -79,17 +58,11 @@ export function shouldSkipAutoAnalysis(
 
 export function shouldExpandSidebar(
   analysisLength: number,
-  isAnalyzing: boolean,
-  isViewingFromSimilar: boolean
+  isAnalyzing: boolean
 ): boolean {
-  return analysisLength > 0 && !isAnalyzing && !isViewingFromSimilar;
+  return analysisLength > 0 && !isAnalyzing;
 }
 
 export function getProvidersFromEnvironment(): string[] {
-  try {
-    return JSON.parse(import.meta.env.VITE_AI_ROUTERS || '["OpenAI","Gemini"]');
-  } catch (error) {
-    console.warn('Failed to parse VITE_AI_ROUTERS, using fallback:', error);
-    return ["OpenAI", "Gemini"];
-  }
+  return ["OpenAI", "Gemini"];
 }

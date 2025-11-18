@@ -1,22 +1,27 @@
 import { fetchOpenAI, fetchGemini } from '../services/aiHandling.js';
 import { processAnalysisResults } from '../services/analysisProcessor.js';
+import { analysisCache, generateCacheKey } from '../services/redisCache.js';
+import { createConfigurationError, createTimeoutError, createProcessingError, ErrorCode } from '../utils/errors.js';
 
 export async function analyzeRoute(req, res) {
   try {
     const { prompt, providers, requestId, supportingLinks } = req.body;
 
-    // Validate input
-    if (!prompt || typeof prompt !== 'string') {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing or invalid prompt'
-      });
-    }
+    // Generate cache key from request data
+    const cacheKey = generateCacheKey('analyze', {
+      prompt: prompt.substring(0, 1000), // Use first 1000 chars for cache key
+      providers: providers.sort().join(','),
+      supportingLinks: supportingLinks?.sort().join(',') || ''
+    });
 
-    if (!providers || !Array.isArray(providers) || providers.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing or invalid providers array'
+    // Check cache first
+    const cachedResult = await analysisCache.get(cacheKey);
+    if (cachedResult) {
+      return res.json({
+        success: true,
+        data: cachedResult.data,
+        requestId,
+        cached: true
       });
     }
 
@@ -24,36 +29,57 @@ export async function analyzeRoute(req, res) {
     const openAIKey = process.env.OPENAI_API_KEY;
     const geminiKey = process.env.GEMINI_API_KEY;
 
+    // Validate API keys before processing
+    const missingKeys = [];
+    if (providers.includes('OpenAI') && !openAIKey) {
+      missingKeys.push('OpenAI');
+    }
+    if (providers.includes('Gemini') && !geminiKey) {
+      missingKeys.push('Gemini');
+    }
+    
+    if (missingKeys.length > 0) {
+      throw createConfigurationError(
+        ErrorCode.MISSING_API_KEY,
+        `API keys not configured for providers: ${missingKeys.join(', ')}`,
+        { missingKeys, requestedProviders: providers }
+      );
+    }
+
     // Create promises for each provider
     const providerPromises = providers.map(async (provider) => {
       try {
         let result;
         switch (provider) {
           case 'OpenAI':
-            if (!openAIKey) {
-              throw new Error('OpenAI API key not configured');
-            }
             result = await fetchOpenAI(prompt, openAIKey);
             break;
           case 'Gemini':
-            if (!geminiKey) {
-              throw new Error('Gemini API key not configured');
-            }
             result = await fetchGemini(prompt, geminiKey);
             break;
           default:
-            throw new Error(`Unknown provider: ${provider}`);
+            throw createProcessingError(
+              ErrorCode.UNKNOWN_ERROR,
+              `Unknown provider: ${provider}`,
+              { provider, validProviders: ['OpenAI', 'Gemini'] }
+            );
         }
         return result;
       } catch (error) {
-        console.error(`Error in provider ${provider}:`, error);
+        console.error(`[Backend Analyze] Error in provider ${provider}:`, error);
         throw error;
       }
     });
 
     // Execute all providers in parallel with timeout
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Analysis timeout after 60 seconds')), 60000);
+      setTimeout(() => {
+        reject(createTimeoutError(
+          ErrorCode.PROCESSING_TIMEOUT,
+          'Analysis timeout after 60 seconds',
+          { timeoutMs: 60000, providers }
+        ));
+      }, 60000);
     });
 
     let results;
@@ -64,9 +90,13 @@ export async function analyzeRoute(req, res) {
       ]);
     } catch (timeoutError) {
       // Timeout occurred - return failed results for all providers
+      const timeoutErrorObj = timeoutError instanceof Error 
+        ? timeoutError 
+        : createTimeoutError(ErrorCode.PROCESSING_TIMEOUT, 'Request timeout after 60 seconds', { providers });
+      
       results = providerPromises.map(() => ({
         status: 'rejected',
-        reason: new Error('Request timeout after 60 seconds')
+        reason: timeoutErrorObj
       }));
     }
 
@@ -94,7 +124,7 @@ export async function analyzeRoute(req, res) {
 
     // If we have web search links and AI didn't include them, merge them in
     if (webSearchLinks.length > 0) {
-      successfulResults.forEach(result => {
+      successfulResults.forEach((result) => {
         if (!result.result.supporting_links || result.result.supporting_links.length === 0) {
           result.result.supporting_links = [...webSearchLinks];
         } else {
@@ -106,21 +136,27 @@ export async function analyzeRoute(req, res) {
       });
     }
 
-    // Return response in the same format as the extension expects
-    res.json({
+    // Prepare response
+    const response = {
       success: true,
       data: {
         successfulResults,
         failedProviders
       },
       requestId
-    });
+    };
+
+    // Cache successful results (7 days TTL)
+    if (successfulResults.length > 0) {
+      await analysisCache.set(cacheKey, response, 7 * 24 * 60 * 60 * 1000);
+    }
+
+    // Return response
+    res.json(response);
   } catch (error) {
-    console.error('Error in analyze route:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to analyze article'
-    });
+    // Error will be handled by error middleware
+    // Re-throw to let middleware handle it
+    throw error;
   }
 }
 

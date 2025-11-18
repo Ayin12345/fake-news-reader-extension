@@ -29,7 +29,7 @@ npm run build
 
 NewsScan uses advanced AI technology to analyze news articles for credibility and detect potential fake news. The extension provides:
 
-- **Multi-provider AI Analysis**: Uses OpenAI, Gemini, and Cohere for comprehensive credibility scoring
+- **Multi-provider AI Analysis**: Uses OpenAI and Gemini for comprehensive credibility scoring
 - **Real-time Analysis**: Instantly analyzes articles as you browse
 - **Evidence-based Results**: Provides reasoning and supporting evidence for credibility scores
 - **Web Search Integration**: Cross-references claims with trusted sources
@@ -45,6 +45,16 @@ NewsScan uses advanced AI technology to analyze news articles for credibility an
 ## Development
 
 After running `npm run dev`, the extension will automatically reload when you make changes.
+
+## Testing
+
+For complete testing instructions, see **[TESTING_GUIDE.md](./TESTING_GUIDE.md)**.
+
+Quick test checklist:
+- ✅ Start Redis cache (required for backend)
+- ✅ Test health endpoint: `curl http://localhost:3000/api/health`
+- ✅ Verify cache is working
+- ✅ Test API endpoints
 
 Happy coding! 🚀 
 

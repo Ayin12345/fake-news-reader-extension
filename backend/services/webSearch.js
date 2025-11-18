@@ -88,11 +88,9 @@ export async function performWebSearch(query, maxResults, googleApiKey, googleSe
     
     // Generate AI-powered search query
     const aiGeneratedQuery = await generateSearchQuery(searchTerms, geminiApiKey);
-    console.log('[Backend WebSearch] AI generated query:', aiGeneratedQuery);
     
     // Add domain exclusion if we have a current domain
     const finalQuery = currentDomain ? `${aiGeneratedQuery} -site:${currentDomain}` : aiGeneratedQuery;
-    console.log('[Backend WebSearch] Final query (with domain exclusion):', finalQuery);
     
     // Execute Google search with AI-generated query
     const params = new URLSearchParams({
@@ -229,7 +227,6 @@ export async function performWebSearch(query, maxResults, googleApiKey, googleSe
     
     // If we have results from AI-generated query, return them
     if (processedResults.length > 0) {
-      console.log('[Backend WebSearch] Returning', processedResults.length, 'results from AI-generated query');
       return {
         results: processedResults,
         searchMethod: 'ai-generated',
@@ -239,7 +236,6 @@ export async function performWebSearch(query, maxResults, googleApiKey, googleSe
     }
 
     // If no results from AI-generated query, try fallback strategies
-    console.log('[Backend WebSearch] No results from AI query, trying fallback strategies...');
     const fallbackStrategies = [
       `"${searchTerms}" fact check`,
       `${searchTerms} verification`,
@@ -249,7 +245,6 @@ export async function performWebSearch(query, maxResults, googleApiKey, googleSe
     ];
     
     for (const fallbackQuery of fallbackStrategies) {
-      console.log('[Backend WebSearch] Trying fallback query:', fallbackQuery);
       const fallbackParams = new URLSearchParams({
         key: googleApiKey,
         cx: googleSearchEngineId,
@@ -316,7 +311,6 @@ export async function performWebSearch(query, maxResults, googleApiKey, googleSe
             .slice(0, maxResults);
           
           if (fallbackResults.length > 0) {
-            console.log('[Backend WebSearch] Returning', fallbackResults.length, 'results from fallback query:', fallbackQuery);
             return {
               results: fallbackResults,
               searchMethod: 'fallback',
@@ -333,7 +327,6 @@ export async function performWebSearch(query, maxResults, googleApiKey, googleSe
     }
     
     // If no fallback strategies worked, return empty results
-    console.log('[Backend WebSearch] No results found from any strategy');
     return {
       results: [],
       searchMethod: 'fallback',

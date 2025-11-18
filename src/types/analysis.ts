@@ -54,12 +54,10 @@ export interface AppState {
   
   // Navigation states
   isViewingFromRecent: boolean;
-  isViewingFromSimilar: boolean;
   originalTabId?: number;
 }
 
 export interface TimerRefs {
   requestIdRef: React.MutableRefObject<number>;
-  timersRef: React.MutableRefObject<Record<string, number>>;
   analysisTriggeredRef: React.MutableRefObject<boolean>;
 }

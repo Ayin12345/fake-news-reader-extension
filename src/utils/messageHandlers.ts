@@ -5,8 +5,6 @@ import {
   getTabState, 
   deleteTabState, 
   getDefaultState,
-  getUrlAnalysis,
-  setUrlAnalysis,
   isTabBeingSetup,
   markTabAsBeingSetup,
   unmarkTabAsBeingSetup
@@ -52,7 +50,6 @@ export async function handleGetPageInfo(message: any, sender: any, sendResponse:
 
 export async function handleAnalyzeArticle(message: any, sender: any, sendResponse: (response: any) => void) {
   try {
-    console.log('[NewsScan] handleAnalyzeArticle called with:', message);
     const tabId = message.tabId;
     if (!tabId) {
       sendResponse({ success: false, error: 'No tab ID provided' });
@@ -60,7 +57,6 @@ export async function handleAnalyzeArticle(message: any, sender: any, sendRespon
     }
 
     const providers = message.providers || [];
-    console.log('[NewsScan] Providers to use:', providers);
     
     // Set analyzing state for this tab
     let currentState = await getTabState(tabId) || getDefaultState();
@@ -91,7 +87,7 @@ export async function handleAnalyzeArticle(message: any, sender: any, sendRespon
         console.warn('Failed to extract supporting links from prompt:', e);
       }
     }
-
+    
     // Call backend API instead of direct API calls
     const backendResponse = await callBackendAnalyze({
       prompt: message.content,
@@ -148,7 +144,6 @@ export async function handleAnalyzeArticle(message: any, sender: any, sendRespon
     // Update tab state with analysis results
     let state = await getTabState(tabId);
     if (!state) {
-      console.warn('No existing tab state found during analysis');
       state = getDefaultState();
     }
     
@@ -187,28 +182,7 @@ export async function handleGetTabState(message: any, sender: any, sendResponse:
 
     // If URL is provided, search for existing analysis for that URL
     if (message.url) {
-      // First check URL-based storage
-      const urlAnalysis = getUrlAnalysis(message.url);
-      
-      if (urlAnalysis) {
-        const state = {
-          pageInfo: urlAnalysis.pageInfo,
-          analysis: urlAnalysis.analysis,
-          failedProviders: urlAnalysis.failedProviders,
-          showButton: false,
-          isAnalyzing: false,
-          hasAttemptedAnalysis: true,
-          isViewingFromRecent: true,
-          originalTabId: undefined
-        };
-        
-        // Save this state for the current tab
-        await saveTabState(tabId, state);
-        sendResponse({ success: true, data: state });
-        return;
-      }
-      
-      // Fallback: search through all tab states to find analysis for this URL
+      // Search through all tab states to find analysis for this URL
       const tabStatesData = await chrome.storage.local.get('tabStates');
       const tabStatesObj = tabStatesData.tabStates || {};
       
@@ -284,16 +258,6 @@ export async function handleSaveTabState(message: any, sender: any, sendResponse
       originalTabId: message.data.originalTabId
     });
     
-    // Also save to URL-based storage if we have analysis
-    if (message.data.pageInfo?.url && message.data.analysis && message.data.analysis.length > 0) {
-      setUrlAnalysis(message.data.pageInfo.url, {
-        pageInfo: message.data.pageInfo,
-        analysis: message.data.analysis,
-        failedProviders: message.data.failedProviders,
-        timestamp: Date.now()
-      });
-    }
-    
     sendResponse({ success: true });
   } catch (error) {
     sendResponse({ success: false, error: 'Failed to save tab state' });
@@ -337,17 +301,8 @@ export async function handleLoadAnalysisInTab(message: any, sender: any, sendRes
     const tabId = message.tabId;
     const analysisData = message.analysisData;
 
-    console.log('🔄 LOAD_ANALYSIS_IN_TAB called for tab:', tabId);
-    console.log('📄 Analysis data received:', {
-      hasPageInfo: !!analysisData.pageInfo,
-      hasAnalysis: !!analysisData.analysis,
-      analysisLength: analysisData.analysis?.length || 0,
-      isViewingFromRecent: analysisData.isViewingFromRecent
-    });
-
     // Prevent double execution
     if (isTabBeingSetup(tabId)) {
-      console.log('⚠️ Tab already being set up, skipping');
       sendResponse({ success: false, error: 'Tab already being set up' });
       return;
     }
@@ -368,16 +323,6 @@ export async function handleLoadAnalysisInTab(message: any, sender: any, sendRes
     };
     
     await saveTabState(tabId, newState);
-
-    // Also store in URL-based storage
-    if (analysisData.pageInfo?.url) {
-      setUrlAnalysis(analysisData.pageInfo.url, {
-        pageInfo: analysisData.pageInfo,
-        analysis: analysisData.analysis,
-        failedProviders: analysisData.failedProviders,
-        timestamp: Date.now()
-      });
-    }
 
     // Mark this tab as having pre-loaded analysis to prevent interference
     await saveTabState(tabId, {
@@ -412,15 +357,6 @@ export async function handleLoadAnalysisInTab(message: any, sender: any, sendRes
             
             // Check if this is a history view - if so, we SHOULD open the sidebar
             if (newState.isViewingFromRecent) {
-              console.log('🔄 Sending preloaded analysis to content script for history view');
-              console.log('📄 Preloaded analysis data:', {
-                hasAnalysis: !!newState.analysis,
-                analysisLength: newState.analysis?.length || 0,
-                hasPageInfo: !!newState.pageInfo,
-                isViewingFromRecent: newState.isViewingFromRecent
-              });
-              console.log('📤 Sending TOGGLE_INJECTED_SIDEBAR message to tab:', tabId);
-              
               chrome.tabs.sendMessage(tabId, { 
                 type: 'TOGGLE_INJECTED_SIDEBAR',
                 keepOpen: true,
@@ -521,15 +457,7 @@ export async function handlePreloadUrlAnalysis(message: any, sender: any, sendRe
       return;
     }
     
-    // Store in URL-based storage
-    setUrlAnalysis(url, {
-      pageInfo: pageInfo,
-      analysis: analysis,
-      failedProviders: failedProviders || [],
-      timestamp: Date.now(),
-    });
-    
-    // Also store in recent analyses for history
+    // Store in recent analyses for history
     const recentData = await chrome.storage.local.get('recentAnalyses');
     const recentList = recentData.recentAnalyses || [];
     

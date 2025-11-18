@@ -44,11 +44,13 @@ interface WebSearchResponse {
 
 export async function callBackendAnalyze(request: AnalyzeRequest): Promise<AnalyzeResponse> {
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+
     const response = await fetch(`${BACKEND_URL}/api/analyze`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers,
       body: JSON.stringify(request)
     });
 
@@ -69,24 +71,18 @@ export async function callBackendAnalyze(request: AnalyzeRequest): Promise<Analy
 
 export async function callBackendWebSearch(request: WebSearchRequest): Promise<WebSearchResponse> {
   try {
-    console.log('[BackendClient] Sending web search request:', {
-      url: `${BACKEND_URL}/api/web-search`,
-      request: request
-    });
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
 
     const response = await fetch(`${BACKEND_URL}/api/web-search`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers,
       body: JSON.stringify(request)
     });
 
-    console.log('[BackendClient] Web search response status:', response.status, response.statusText);
-
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[BackendClient] Web search error response:', errorText);
       let errorData;
       try {
         errorData = JSON.parse(errorText);
@@ -96,13 +92,7 @@ export async function callBackendWebSearch(request: WebSearchRequest): Promise<W
       throw new Error(errorData.error || `HTTP ${response.status}`);
     }
 
-    const jsonResponse = await response.json();
-    console.log('[BackendClient] Web search success:', {
-      success: jsonResponse.success,
-      hasData: !!jsonResponse.data,
-      resultsCount: jsonResponse.data?.results?.length || 0
-    });
-    return jsonResponse;
+    return await response.json();
   } catch (error) {
     console.error('[BackendClient] Web search error:', error);
     return {
@@ -112,15 +102,4 @@ export async function callBackendWebSearch(request: WebSearchRequest): Promise<W
   }
 }
 
-export async function checkBackendHealth(): Promise<boolean> {
-  try {
-    const response = await fetch(`${BACKEND_URL}/api/health`);
-    if (!response.ok) return false;
-    const data = await response.json();
-    return data.status === 'healthy' || data.status === 'degraded';
-  } catch (error) {
-    console.error('[BackendClient] Health check failed:', error);
-    return false;
-  }
-}
 

@@ -23,7 +23,6 @@ export function useAnalysisState(): [AppState, TimerRefs, AppState & {
   setHasPreloadedAnalysis: (value: boolean) => void;
   setRequiresManualTrigger: (value: boolean) => void;
   setIsViewingFromRecent: (value: boolean) => void;
-  setIsViewingFromSimilar: (value: boolean) => void;
   setOriginalTabId: (value: number | undefined) => void;
 }] {
   // Loading states
@@ -56,12 +55,10 @@ export function useAnalysisState(): [AppState, TimerRefs, AppState & {
   
   // Navigation states
   const [isViewingFromRecent, setIsViewingFromRecent] = useState(false);
-  const [isViewingFromSimilar, setIsViewingFromSimilar] = useState(false);
   const [originalTabId, setOriginalTabId] = useState<number | undefined>();
 
   // Refs
   const requestIdRef = useRef(0);
-  const timersRef = useRef<Record<string, number>>({});
   const analysisTriggeredRef = useRef(false);
 
   const state: AppState = {
@@ -86,13 +83,11 @@ export function useAnalysisState(): [AppState, TimerRefs, AppState & {
     hasPreloadedAnalysis,
     requiresManualTrigger,
     isViewingFromRecent,
-    isViewingFromSimilar,
     originalTabId
   };
 
   const refs: TimerRefs = {
     requestIdRef,
-    timersRef,
     analysisTriggeredRef
   };
 
@@ -119,7 +114,6 @@ export function useAnalysisState(): [AppState, TimerRefs, AppState & {
     setHasPreloadedAnalysis,
     setRequiresManualTrigger,
     setIsViewingFromRecent,
-    setIsViewingFromSimilar,
     setOriginalTabId
   } as const;
 

@@ -209,66 +209,38 @@ export async function analyzeArticle(
       // Just ensure isDetectingPage is off
       setters.setIsDetectingPage(false);
 
-      console.log('[NewsScan] Starting analysis with providers:', providers);
-      console.log('[NewsScan] Page info:', pageInfo);
-      
       // Perform web search for supporting links using backend
       let webSearchResults: string[] = [];
+      
       try {
-        console.log('[NewsScan] Performing web search for supporting links...');
-        console.log('[NewsScan] Search request:', {
-          title: pageInfo.title,
-          url: pageInfo.url,
-          limit: 5
-        });
-        
         const searchResponse = await callBackendWebSearch({
           title: pageInfo.title,
           url: pageInfo.url,
           limit: 5
         });
         
-        console.log('[NewsScan] Web search response:', {
-          success: searchResponse.success,
-          hasData: !!searchResponse.data,
-          error: searchResponse.error,
-          resultsCount: searchResponse.data?.results?.length || 0
-        });
-        
         if (searchResponse.success && searchResponse.data) {
-          // Log which search method was used
-          console.log('[NewsScan] Search method used:', searchResponse.data.searchMethod);
-          console.log('[NewsScan] Query used:', searchResponse.data.queryUsed);
-          if (searchResponse.data.aiQueryGenerated) {
-            console.log('[NewsScan] AI generated query:', searchResponse.data.aiQueryGenerated);
-          }
-          if (searchResponse.data.fallbackQueryUsed) {
-            console.log('[NewsScan] Fallback query used:', searchResponse.data.fallbackQueryUsed);
-          }
-          
           if (searchResponse.data.results && Array.isArray(searchResponse.data.results)) {
             webSearchResults = searchResponse.data.results.map(result => result.url);
-            console.log('[NewsScan] Web search found', webSearchResults.length, 'supporting links');
-            console.log('[NewsScan] Search results:', searchResponse.data.results.map(r => ({ title: r.title, url: r.url })));
           } else {
-            console.warn('[NewsScan] Web search returned no results array:', searchResponse.data);
+            console.warn('[NewsScan] Web search returned no results array');
             webSearchResults = [];
           }
           
-          // Warn if using fallback method with bogus results
           if (searchResponse.data.searchMethod === 'fallback') {
-            console.warn('[NewsScan] ⚠️  Using fallback search method - results may be less relevant!');
-            console.warn('[NewsScan] AI query that failed:', searchResponse.data.aiQueryGenerated);
-            console.warn('[NewsScan] Consider checking if the AI-generated query was appropriate for the article');
+            console.warn('[NewsScan] Using fallback search method - results may be less relevant');
           }
         } else {
           console.error('[NewsScan] Web search failed:', searchResponse.error || 'Unknown error');
-          console.error('[NewsScan] Full search response:', searchResponse);
+          webSearchResults = [];
         }
       } catch (searchError) {
         console.error('[NewsScan] Web search exception:', searchError);
         webSearchResults = [];
       }
+      
+      // Build prompt with web search results
+      const prompt = buildAnalysisPrompt(pageInfo.url, pageInfo.title, pageInfo.content, webSearchResults);
       
       // Add a timeout to prevent infinite loading
       const timeout = setTimeout(() => {
@@ -281,7 +253,7 @@ export async function analyzeArticle(
       chrome.runtime.sendMessage({
         type: 'ANALYZE_ARTICLE',
         tabId: currentTab.id,
-        content: buildAnalysisPrompt(pageInfo.url, pageInfo.title, pageInfo.content, webSearchResults),
+        content: prompt,
         providers: providers
       }, async (response) => {
         clearTimeout(timeout); // Clear timeout when we get a response
@@ -295,8 +267,6 @@ export async function analyzeArticle(
           return;
         }
         
-        console.log('[NewsScan] Received response:', response);
-        
         if (!response?.success) {
           console.error('[NewsScan] Analysis failed:', response?.error);
           setters.setError(response?.error || 'Failed to get analysis response');
@@ -307,8 +277,6 @@ export async function analyzeArticle(
 
         // Process the analysis results
         const { successfulResults, failedProviders } = response.data;
-        console.log('[NewsScan] Successful results:', successfulResults);
-        console.log('[NewsScan] Failed providers:', failedProviders);
         
         setters.setAnalysis(successfulResults);
         setters.setFailedProviders(failedProviders);
@@ -320,9 +288,7 @@ export async function analyzeArticle(
         // Save to recent analyses if we have valid results
         if (successfulResults && successfulResults.length > 0 && pageInfo) {
           try {
-            console.log('=== SAVING ANALYSIS TO STORAGE ===');
             const existing = await getStorage('recentAnalyses');
-            console.log('Existing analyses:', existing);
             
             const averageScore = Math.round(successfulResults.reduce((sum: number, result: any) => sum + result.result.credibility_score, 0) / successfulResults.length);
             const top = successfulResults[0];
@@ -338,20 +304,8 @@ export async function analyzeArticle(
               failedProviders: failedProviders || []
             };
             
-            console.log('New entry to save:', {
-              url: newEntry.url,
-              title: newEntry.title,
-              hasFullAnalysis: !!newEntry.fullAnalysis,
-              fullAnalysisLength: newEntry.fullAnalysis?.length || 0,
-              hasPageInfo: !!newEntry.pageInfo,
-              hasFailedProviders: !!newEntry.failedProviders
-            });
-            
             const updated = [newEntry, ...existing].slice(0, 10);
-            console.log('Updated analyses array length:', updated.length);
-            
             await setStorage('recentAnalyses', updated);
-            console.log('Analysis saved to storage successfully');
           } catch (storageError) {
             console.error('Error saving to recent analyses:', storageError);
           }
@@ -371,26 +325,16 @@ export async function loadAnalysisForUrl(
   }
 ): Promise<void> {
   try {
-    console.log('🔍 Loading analysis for URL:', url, 'timestamp:', timestamp);
     const recentAnalyses = await getStorage('recentAnalyses');
-    console.log('📚 Recent analyses found:', recentAnalyses?.length || 0);
     
     // Find the specific analysis entry
     let analysisEntry = null;
     if (Array.isArray(recentAnalyses)) {
       if (timestamp) {
         analysisEntry = recentAnalyses.find(entry => entry.url === url && entry.timestamp === timestamp);
-        console.log('🔍 Looking for exact match with timestamp:', timestamp);
       } else {
         analysisEntry = recentAnalyses.find(entry => entry.url === url);
-        console.log('🔍 Looking for URL match only');
       }
-    }
-    
-    console.log('📄 Analysis entry found:', !!analysisEntry);
-    if (analysisEntry) {
-      console.log('📄 Has fullAnalysis:', !!analysisEntry.fullAnalysis);
-      console.log('📄 Has pageInfo:', !!analysisEntry.pageInfo);
     }
     
     if (analysisEntry && analysisEntry.fullAnalysis) {

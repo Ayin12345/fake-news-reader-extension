@@ -19,7 +19,6 @@ interface MessageHandlerProps {
     setRequiresManualTrigger: (value: boolean) => void;
     setIsPageLoading: (value: boolean) => void;
     setIsManualTrigger: (value: boolean) => void;
-    setIsViewingFromSimilar: (value: boolean) => void;
     setProviderStatuses: (value: Record<string, 'waiting' | 'analyzing' | 'complete' | 'failed'>) => void;
     setSelectedPage: (value: 'home' | 'settings') => void;
     setError: (value: string) => void;
@@ -73,7 +72,6 @@ export function useMessageHandlers({ state, refs, setters }: MessageHandlerProps
         
         console.log('🚨 TRIGGER_NEW_ANALYSIS will override preloaded analysis!');
         setters.setIsManualTrigger(true);
-        setters.setIsViewingFromSimilar(false);
         // Reset state for new analysis
         setters.setError('');
         setters.setAnalysis([]);
@@ -141,7 +139,6 @@ export function useMessageHandlers({ state, refs, setters }: MessageHandlerProps
     setters.setIsManualTrigger(false);
     setters.setHasPreloadedAnalysis(false);
     setters.setRequiresManualTrigger(false);
-    setters.setIsViewingFromSimilar(false);
     
     // Reset the analysis trigger ref
     refs.analysisTriggeredRef.current = false;

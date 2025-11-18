@@ -1,22 +1,25 @@
 import { performWebSearch } from '../services/webSearch.js';
+import { webSearchCache, generateCacheKey } from '../services/redisCache.js';
+import { createConfigurationError, ErrorCode } from '../utils/errors.js';
 
 export async function webSearchRoute(req, res) {
   try {
-    console.log('[Backend WebSearch] Received request:', {
-      body: req.body,
-      title: req.body?.title,
-      url: req.body?.url,
-      limit: req.body?.limit
-    });
-
     const { title, url, limit = 5 } = req.body;
 
-    // Validate input
-    if (!title || typeof title !== 'string') {
-      console.error('[Backend WebSearch] Validation failed: Missing or invalid title', { title });
-      return res.status(400).json({
-        success: false,
-        error: 'Missing or invalid title'
+    // Generate cache key
+    const cacheKey = generateCacheKey('webSearch', {
+      title: title.substring(0, 200),
+      url: url || '',
+      limit
+    });
+
+    // Check cache first
+    const cachedResult = await webSearchCache.get(cacheKey);
+    if (cachedResult) {
+      return res.json({
+        success: true,
+        data: cachedResult,
+        cached: true
       });
     }
 
@@ -26,16 +29,18 @@ export async function webSearchRoute(req, res) {
     const geminiApiKey = process.env.GEMINI_API_KEY;
 
     if (!googleApiKey || !googleSearchEngineId) {
-      return res.status(500).json({
-        success: false,
-        error: 'Google Search API not configured'
-      });
+      throw createConfigurationError(
+        ErrorCode.MISSING_API_KEY,
+        'Google Search API not configured',
+        { 
+          hasGoogleApiKey: !!googleApiKey,
+          hasSearchEngineId: !!googleSearchEngineId
+        }
+      );
     }
 
     // Combine title and URL for search query (same format as frontend)
     const searchQuery = url ? `${title} ${url}` : title;
-
-    console.log('[Backend WebSearch] Starting search with query:', searchQuery);
 
     // Perform web search
     const searchResponse = await performWebSearch(
@@ -46,10 +51,10 @@ export async function webSearchRoute(req, res) {
       geminiApiKey
     );
 
-    console.log('[Backend WebSearch] Search completed:', {
-      resultsCount: searchResponse.results?.length || 0,
-      searchMethod: searchResponse.searchMethod
-    });
+    // Cache successful results (24 hours TTL)
+    if (searchResponse.results && searchResponse.results.length > 0) {
+      await webSearchCache.set(cacheKey, searchResponse, 24 * 60 * 60 * 1000);
+    }
 
     // Return response in the same format as the extension expects
     res.json({
@@ -57,11 +62,9 @@ export async function webSearchRoute(req, res) {
       data: searchResponse
     });
   } catch (error) {
-    console.error('Error in web search route:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Failed to perform web search'
-    });
+    // Error will be handled by error middleware
+    // Re-throw to let middleware handle it
+    throw error;
   }
 }
 

@@ -41,16 +41,6 @@ const getScoreRange = (results: AnalysisResult[]): { min: number; max: number } 
   };
 };
 
-// Fisher-Yates shuffle algorithm
-const shuffleArray = <T,>(array: T[]): T[] => {
-  const shuffled = [...array];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
-};
-
 const getAllEvidence = (results: AnalysisResult[]) => {
   const evidenceMap = new Map<string, { impact: string; providers: string[]; sentiment: 'positive' | 'negative' | 'neutral' }>();
   
@@ -76,39 +66,29 @@ const getAllEvidence = (results: AnalysisResult[]) => {
     }
   });
 
-  const evidence = Array.from(evidenceMap.entries())
+  // Return evidence in logical order (grouped by provider agreement)
+  return Array.from(evidenceMap.entries())
     .map(([quote, data]) => ({
       quote,
       impact: data.impact,
       providers: data.providers,
       sentiment: data.sentiment
-    }));
-
-  // Shuffle the evidence to mix providers instead of grouping by provider count
-  return shuffleArray(evidence);
+    }))
+    .sort((a, b) => b.providers.length - a.providers.length); // Sort by provider count (most agreed upon first)
 };
 
 const getAllLinks = (results: AnalysisResult[]): string[] => {
   const uniqueLinks = new Set<string>();
-  console.log('getAllLinks - processing results:', results);
   
-  results.forEach((result, index) => {
-    console.log(`Result ${index}:`, result);
-    console.log(`Result ${index} supporting_links:`, result.result.supporting_links);
-    
+  results.forEach((result) => {
     if (result.result.supporting_links && Array.isArray(result.result.supporting_links)) {
       result.result.supporting_links.forEach(link => {
-        console.log('Adding link:', link);
         uniqueLinks.add(link);
       });
-    } else {
-      console.log(`Result ${index} has no supporting_links or it's not an array`);
     }
   });
   
-  const linksArray = Array.from(uniqueLinks);
-  console.log('getAllLinks - final links array:', linksArray);
-  return linksArray;
+  return Array.from(uniqueLinks);
 };
 
 const getScoreCategory = (score: number) => {
@@ -147,9 +127,7 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
   useEffect(() => {
     const load = async () => {
       try {
-        console.log('Loading history from storage...');
         const list = await getStorage('recentAnalyses');
-        console.log('Raw storage data:', list);
         
         if (Array.isArray(list)) {
           const processedHistory = list
@@ -164,10 +142,8 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
               failedProviders: i.failedProviders || []
             }));
           
-          console.log('Processed history:', processedHistory);
           setHistory(processedHistory);
         } else {
-          console.log('Storage data is not an array:', typeof list);
           setHistory([]);
         }
       } catch (e) {
@@ -194,26 +170,6 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
   const allLinks = getAllLinks(analysis);
   const scoreCategory = getScoreCategory(averageScore);
 
-  // Debug logging with error handling
-  try {
-    console.log('AnalysisResults - analysis:', analysis);
-    console.log('AnalysisResults - analysis structure check:');
-    analysis.forEach((result, i) => {
-      console.log(`Result ${i}:`, {
-        provider: result.provider,
-        hasResult: !!result.result,
-        hasSupportingLinks: !!result.result?.supporting_links,
-        supportingLinksType: typeof result.result?.supporting_links,
-        supportingLinksLength: result.result?.supporting_links?.length,
-        supportingLinksContent: result.result?.supporting_links
-      });
-    });
-    console.log('AnalysisResults - allLinks:', allLinks);
-    console.log('AnalysisResults - allEvidence:', allEvidence);
-  } catch (e) {
-    console.error('Error in debug logging:', e);
-  }
-
   // Filter out error messages that aren't actual sources
   const validSources = allLinks.filter(link => 
     link && 
@@ -224,9 +180,6 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
     !link.includes('Error accessing') &&
     !link.includes('No verification sources found')
   );
-  
-  console.log('validSources after filtering:', validSources);
-  console.log('Original allLinks before filtering:', allLinks);
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -278,8 +231,6 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
 
       case 'sources':
         try {
-          console.log('Related tab - validSources:', validSources);
-          console.log('Related tab - allLinks:', allLinks);
           return (
             <div className={styles.sourcesList}>
               {validSources.length > 0 ? (
@@ -353,8 +304,6 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
 
       case 'history':
         try {
-          console.log('History tab - history array:', history);
-          console.log('History tab - history length:', history.length);
           return (
           <div className={styles.historyList}>
             {history.length === 0 ? (
@@ -445,7 +394,11 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
           </div>
         )}
         <div className={styles.scoreLabel}>{scoreCategory.text}</div>
-        <div className={styles.scoreRange}>Range: {scoreRange.min}-{scoreRange.max}</div>
+        {scoreRange.min === scoreRange.max ? (
+          <div className={styles.scoreRange}>Score: {scoreRange.min}</div>
+        ) : (
+          <div className={styles.scoreRange}>Range: {scoreRange.min}-{scoreRange.max}</div>
+        )}
         {pageTitle && <div className={styles.pageTitle}>{pageTitle}</div>}
       </div>
 
@@ -464,8 +417,12 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
           <div className={styles.statLabel}>{validSources.length === 1 ? 'Related' : 'Related'}</div>
         </div>
         <div className={styles.statItem}>
-          <div className={styles.statValue}>{scoreRange.min}-{scoreRange.max}</div>
-          <div className={styles.statLabel}>Score Range</div>
+          <div className={styles.statValue}>
+            {scoreRange.min === scoreRange.max ? scoreRange.min : `${scoreRange.min}-${scoreRange.max}`}
+          </div>
+          <div className={styles.statLabel}>
+            {scoreRange.min === scoreRange.max ? 'Score' : 'Score Range'}
+          </div>
         </div>
       </div>
 
@@ -508,7 +465,6 @@ export const AnalysisResults: React.FC<AnalysisResultsProps> = ({
         <button 
           className={styles.analyzeButton} 
           onClick={() => {
-            console.log('DONE button clicked, isViewingFromRecent:', isViewingFromRecent);
             onNewAnalysis();
           }}
         >

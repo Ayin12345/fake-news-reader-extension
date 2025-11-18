@@ -17,40 +17,31 @@ export default defineContentScript({
     '*://www.googleapis.com/*'
   ],
   main() {
-    // Don't run on certain pages where the extension shouldn't be active
-    if (location.protocol === 'chrome:' || 
-        location.protocol === 'chrome-extension:' || 
-        location.protocol === 'moz-extension:' ||
-        location.protocol === 'edge:' ||
-        location.protocol === 'about:' ||
-        location.href.includes('chrome-devtools://') ||
-        location.href.includes('devtools://') ||
-        location.href.includes('console.cloud.google.com') ||
-        location.href.includes('developers.google.com') ||
-        location.href.includes('apis.google.com') ||
-        location.href.includes('www.googleapis.com')) {
-      console.log('[FNR] Extension disabled on restricted page:', location.href);
-      return;
-    }
+    // Note: Restricted pages are already excluded via exclude_matches above
+    const isDev = import.meta.env.DEV || import.meta.env.MODE === 'development';
     
-    console.log('[FNR] Content script starting on', location.href);
+    if (isDev) {
+      console.log('[FNR] Content script starting on', location.href);
+    }
 
     const DEFAULT_WIDTH_PX = 440;
     const EXPANDED_WIDTH_PX = 720; // Wider width for analysis results
     let currentWidthPx = DEFAULT_WIDTH_PX;
 
-    // Debug helpers
-    (window as any).fnrOpenSidebar = () => ensureInjected(true);
-    (window as any).fnrDebug = () => {
-      const el = document.getElementById('fake-news-reader-injected-sidebar') as HTMLElement | null;
-      console.log('[FNR] debug', {
-        exists: !!el,
-        widthStyle: el?.style.width,
-        display: el?.style.display,
-        rect: el?.getBoundingClientRect?.(),
-        bodyMarginRight: getComputedStyle(document.body).marginRight,
-      });
-    };
+    // Debug helpers (development only)
+    if (isDev) {
+      (window as any).fnrOpenSidebar = () => ensureInjected(true);
+      (window as any).fnrDebug = () => {
+        const el = document.getElementById('fake-news-reader-injected-sidebar') as HTMLElement | null;
+        console.log('[FNR] debug', {
+          exists: !!el,
+          widthStyle: el?.style.width,
+          display: el?.style.display,
+          rect: el?.getBoundingClientRect?.(),
+          bodyMarginRight: getComputedStyle(document.body).marginRight,
+        });
+      };
+    }
 
     // Reply to ping from background for readiness check
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -63,22 +54,18 @@ export default defineContentScript({
     // Toggle from toolbar: open if not present, else close
     chrome.runtime.onMessage.addListener((message) => {
       if (message?.type === 'TOGGLE_INJECTED_SIDEBAR') {
-        console.log('🔥🔥🔥 SIDEBAR OPENER #4: CONTENT SCRIPT - TOGGLE MESSAGE RECEIVED 🔥🔥🔥');
-        console.log('[FNR] Toggle message received:', message);
-        console.log('📄 Has preloadedAnalysis:', !!message.preloadedAnalysis);
-        console.log('📄 Has hasPreloadedAnalysis flag:', !!message.hasPreloadedAnalysis);
+        if (isDev) {
+          console.log('[FNR] Toggle message received:', message);
+        }
         
         const exists = !!document.getElementById('fake-news-reader-injected-sidebar');
         if (exists) {
           // If sidebar exists, check if we should keep it open or close it
           // For analysis loading, we want to keep it open
           if (message.keepOpen) {
-            console.log('🔥🔥🔥 SIDEBAR OPENER #5: CONTENT SCRIPT - KEEPING SIDEBAR OPEN 🔥🔥🔥');
-            console.log('[FNR] Sidebar exists, keeping it open for analysis');
             ensureInjected(true);
           // If we have preloaded analysis, send it to the iframe
           if (message.preloadedAnalysis || message.hasPreloadedAnalysis) {
-            console.log('✅ Sending PRELOADED_ANALYSIS message to iframe');
             setTimeout(() => {
               const iframe = document.querySelector('#fake-news-reader-injected-sidebar iframe') as HTMLIFrameElement;
               if (iframe?.contentWindow) {
@@ -88,25 +75,17 @@ export default defineContentScript({
                 }, '*');
               }
             }, 50);
-          } else {
-            console.log('❌ No preloaded analysis, would send TRIGGER_NEW_ANALYSIS');
           }
           } else {
-            console.log('[FNR] Sidebar exists, toggling it closed');
             removeInjected();
           }
         } else {
-          console.log('🔥🔥🔥 SIDEBAR OPENER #6: CONTENT SCRIPT - CREATING NEW SIDEBAR 🔥🔥🔥');
-          console.log('[FNR] Sidebar does not exist, creating it');
           ensureInjected(true);
           // If we have preloaded analysis, send it to the iframe after creation
           if (message.preloadedAnalysis || message.hasPreloadedAnalysis) {
-            console.log('✅ TAKING PRELOADED PATH - Sending PRELOADED_ANALYSIS message to iframe (new sidebar)');
-            console.log('✅ Will NOT send TRIGGER_NEW_ANALYSIS because we have preloaded data');
             setTimeout(() => {
               const iframe = document.querySelector('#fake-news-reader-injected-sidebar iframe') as HTMLIFrameElement;
               if (iframe?.contentWindow) {
-                console.log('📤 Actually sending PRELOADED_ANALYSIS message now');
                 iframe.contentWindow.postMessage({
                   type: 'PRELOADED_ANALYSIS',
                   data: message.preloadedAnalysis
@@ -114,12 +93,10 @@ export default defineContentScript({
               }
             }, 100);
           } else {
-            console.log('❌ TAKING TRIGGER PATH - No preloaded analysis, sending TRIGGER_NEW_ANALYSIS');
             // If no preloaded analysis, trigger manual analysis when opened via extension icon
             setTimeout(() => {
               const iframe = document.querySelector('#fake-news-reader-injected-sidebar iframe') as HTMLIFrameElement;
               if (iframe?.contentWindow) {
-                console.log('📤 Actually sending TRIGGER_NEW_ANALYSIS message now');
                 iframe.contentWindow.postMessage({
                   type: 'TRIGGER_NEW_ANALYSIS'
                 }, '*');
@@ -136,7 +113,6 @@ export default defineContentScript({
         
         // Ensure sidebar exists and apply new layout
         if (shouldExpand && !document.getElementById('fake-news-reader-injected-sidebar')) {
-          console.log('🔥🔥🔥 SIDEBAR OPENER #7: CONTENT SCRIPT - EXPAND_FOR_ANALYSIS CREATING SIDEBAR 🔥🔥🔥');
           ensureInjected(true);
         } else if (document.getElementById('fake-news-reader-injected-sidebar')) {
           applyLayout();
@@ -144,7 +120,9 @@ export default defineContentScript({
       }
     });
 
-    console.log('[FNR] Content script loaded');
+    if (isDev) {
+      console.log('[FNR] Content script loaded');
+    }
 
     // Handle page content request from background
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -237,7 +215,6 @@ export default defineContentScript({
 
       // Create logo container
       const logoContainer = document.createElement('div');
-      console.log('NewsScan: Creating logo container');
       logoContainer.style.cssText = [
         'all: initial',
         'display: flex',
@@ -248,8 +225,6 @@ export default defineContentScript({
       // Create logo element
       const logo = document.createElement('img');
       const logoUrl = chrome.runtime.getURL('logo.png');
-      console.log('NewsScan: Logo URL:', logoUrl);
-      console.log('NewsScan: Chrome runtime ID:', chrome.runtime.id);
       logo.src = logoUrl;
       logo.alt = 'NewsScan Logo';
       logo.style.cssText = [
@@ -259,15 +234,11 @@ export default defineContentScript({
         'object-fit: contain'
       ].join(';');
       
-      // Handle logo load success
-      logo.onload = () => {
-        console.log('NewsScan: Logo loaded successfully');
-      };
-      
       // Handle logo load error - hide logo if it fails to load
       logo.onerror = (error) => {
-        console.error('NewsScan: Logo failed to load:', error);
-        console.error('NewsScan: Logo URL that failed:', logoUrl);
+        if (isDev) {
+          console.error('NewsScan: Logo failed to load:', error);
+        }
         logo.style.display = 'none';
       };
 
@@ -282,7 +253,6 @@ export default defineContentScript({
       ].join(';');
 
       // Add logo and title to container
-      console.log('NewsScan: Adding logo and title to container');
       logoContainer.appendChild(logo);
       logoContainer.appendChild(title);
 
@@ -305,7 +275,6 @@ export default defineContentScript({
       // The close button should navigate the app back to its home screen
       // rather than closing the sidebar entirely.
 
-      console.log('NewsScan: Adding logo container to header');
       header.appendChild(logoContainer);
       header.appendChild(closeBtn);
 

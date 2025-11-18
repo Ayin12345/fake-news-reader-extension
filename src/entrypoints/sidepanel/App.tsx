@@ -3,23 +3,18 @@ import { AnalysisResults } from './components/AnalysisResults';
 import { AnalysisLoadingState, ErrorState, InitialLoadingState } from './components/LoadingStates';
 import { useAnalysisState } from '../../hooks/useAnalysisState';
 import { useMessageHandlers } from '../../hooks/useMessageHandlers';
-import { useLayoutRefresh } from '../../hooks/useLayoutRefresh';
-import { createTimerFunctions, shouldSkipAutoAnalysis, shouldExpandSidebar } from '../../utils/analysisHelpers';
+import { shouldSkipAutoAnalysis, shouldExpandSidebar } from '../../utils/analysisHelpers';
 import { getPageInfo, analyzeArticle, loadAnalysisForUrl } from '../../utils/analysisOperations';
 import { getMulti, setStorage } from '../../utils/storage';
 import styles from './styles/App.module.css';
 
 function App() {
-  console.log('🏁 App component starting render');
-  
   const [state, refs, setters] = useAnalysisState();
   const [isTabVisible, setIsTabVisible] = useState(true);
   const [isInitializing, setIsInitializing] = useState(true);
   const [isReady, setIsReady] = useState(false);
   const [tabStateChecked, setTabStateChecked] = useState(false);
   const { resetState } = useMessageHandlers({ state, refs, setters });
-  const { startTimer, endTimer } = createTimerFunctions(refs.timersRef);
-  const { forceLayoutRefresh } = useLayoutRefresh();
 
   // Listen for provider updates
   useEffect(() => {
@@ -43,20 +38,6 @@ function App() {
     setters.setIsDetectingPage,
     setters.setError,
   ]);
-
-  // Log initial state only in development
-  if (process.env.NODE_ENV === 'development') {
-    console.log('📊 Initial state:', {
-      isInitializing,
-      isTabVisible,
-      uiReady: state.uiReady,
-      isPageLoading: state.isPageLoading,
-      isAnalyzing: state.isAnalyzing,
-      hasPageInfo: !!state.pageInfo,
-      analysisLength: state.analysis.length,
-      error: state.error
-    });
-  }
 
   // Handle page info loading with manual trigger support
   const handleGetPageInfo = useCallback(async (isManualTrigger = false) => {
@@ -156,50 +137,32 @@ function App() {
 
   // Initialize UI
   useEffect(() => {
-    console.log('🔄 Starting UI initialization effect');
     let mounted = true;
     
     const initializeUI = async () => {
-      console.log('⚡ Starting UI initialization');
       try {
-        console.log('📦 Getting stored state...');
         const { selectedPage, hasAttemptedAnalysis: storedHasAttempted } = await getMulti([
           'selectedPage',
           'hasAttemptedAnalysis',
         ] as const);
-        console.log('📦 Got stored state:', { selectedPage, storedHasAttempted });
 
-        if (!mounted) {
-          console.log('❌ Component unmounted during initialization');
-          return;
-        }
+        if (!mounted) return;
 
-        console.log('🔄 Setting initial state...');
         setters.setSelectedPage(selectedPage || 'home');
         setters.setHasAttemptedAnalysis(storedHasAttempted || false);
         setters.setUiReady(true);
         setIsInitializing(false);
-        // Only now make the sidebar visible
         setIsReady(true);
-        console.log('✅ UI initialization complete');
       } catch (error) {
-        console.error('❌ UI initialization failed:', error);
-        if (!mounted) {
-          console.log('❌ Component unmounted during error handling');
-          return;
-        }
+        console.error('UI initialization failed:', error);
+        if (!mounted) return;
 
-        console.log('⚠️ Setting error state');
-        // First clear any loading states
         setters.setIsAnalyzing(false);
         setters.setIsPageLoading(false);
         setters.setIsDetectingPage(false);
-        
-        // Then set error and UI states
         setters.setError('Failed to initialize. Please try again.');
         setters.setUiReady(true);
         setIsInitializing(false);
-        // Even on error, we should show the UI
         setIsReady(true);
       }
     };
@@ -207,7 +170,6 @@ function App() {
     initializeUI();
 
     return () => {
-      console.log('🧹 Cleaning up UI initialization effect');
       mounted = false;
     };
   }, [
@@ -268,19 +230,6 @@ function App() {
 
   // Auto-start analysis when UI is ready (but only if no analysis and not viewing history/preloaded)
   useEffect(() => {
-    console.log('🔍 Checking auto-start conditions:', {
-      uiReady: state.uiReady,
-      autoStarted: state.autoStarted,
-      isPageLoading: state.isPageLoading,
-      isAnalyzing: state.isAnalyzing,
-      hasPageInfo: !!state.pageInfo,
-      analysisTriggered: refs.analysisTriggeredRef.current,
-      analysisLength: state.analysis.length,
-      isViewingFromRecent: state.isViewingFromRecent,
-      hasPreloadedAnalysis: state.hasPreloadedAnalysis,
-      tabStateChecked
-    });
-
     let mounted = true;
 
     const startAnalysis = async () => {
@@ -292,22 +241,13 @@ function App() {
         !state.isViewingFromRecent &&
         !state.hasPreloadedAnalysis
       ) {
-        console.log('🚀 Starting auto-analysis');
         try {
-          console.log('🔄 Setting autoStarted flag');
           setters.setAutoStarted(true);
-          
-          console.log('📄 Getting page info automatically');
           await handleGetPageInfo();
-          console.log('✅ Auto-analysis page info complete');
         } catch (error) {
-          console.error('❌ Auto-analysis failed:', error);
-          if (!mounted) {
-            console.log('❌ Component unmounted during auto-analysis');
-            return;
-          }
+          console.error('Auto-analysis failed:', error);
+          if (!mounted) return;
 
-          console.log('⚠️ Resetting auto-analysis state');
           setters.setError('Failed to start analysis. Please try again.');
           setters.setIsPageLoading(false);
           setters.setIsDetectingPage(false);
@@ -319,7 +259,6 @@ function App() {
     startAnalysis();
 
     return () => {
-      console.log('🧹 Cleaning up auto-start effect');
       mounted = false;
     };
   }, [
@@ -335,15 +274,6 @@ function App() {
 
   // Handle manual trigger for page info loading (skip while viewing history)
   useEffect(() => {
-    console.log('🔍 Checking manual trigger conditions:', {
-      isManualTrigger: state.isManualTrigger,
-      hasPageInfo: !!state.pageInfo,
-      isPageLoading: state.isPageLoading,
-      isViewingFromRecent: state.isViewingFromRecent,
-      isAnalyzing: state.isAnalyzing,
-      analysisTriggered: refs.analysisTriggeredRef.current
-    });
-
     let mounted = true;
 
     const handleManualTrigger = async () => {
@@ -354,19 +284,12 @@ function App() {
         !state.isViewingFromRecent &&
         !state.hasPreloadedAnalysis
       ) {
-        console.log('🚀 Starting manual trigger analysis');
         try {
-          console.log('📄 Getting page info manually');
           await handleGetPageInfo(true);
-          console.log('✅ Manual trigger page info complete');
         } catch (error) {
-          console.error('❌ Manual trigger failed:', error);
-          if (!mounted) {
-            console.log('❌ Component unmounted during manual trigger');
-            return;
-          }
+          console.error('Manual trigger failed:', error);
+          if (!mounted) return;
 
-          console.log('⚠️ Resetting manual trigger state');
           setters.setError('Failed to analyze page. Please try again.');
           setters.setIsPageLoading(false);
           setters.setIsDetectingPage(false);
@@ -378,7 +301,6 @@ function App() {
     handleManualTrigger();
 
     return () => {
-      console.log('🧹 Cleaning up manual trigger effect');
       mounted = false;
     };
   }, [
@@ -396,16 +318,6 @@ function App() {
 
   // Handle auto-analysis logic (disabled while viewing history or preloaded)
   useEffect(() => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔍 Auto-analysis check:', {
-        canStart: state.autoStarted && state.pageInfo && state.analysis.length === 0 && !refs.analysisTriggeredRef.current,
-        reason: !state.autoStarted ? 'Not auto-started' :
-                !state.pageInfo ? 'No page info' :
-                state.analysis.length > 0 ? 'Already has analysis' :
-                refs.analysisTriggeredRef.current ? 'Analysis already triggered' : 'Ready to start'
-      });
-    }
-
     let mounted = true;
 
     const startAutoAnalysis = async () => {
@@ -417,9 +329,7 @@ function App() {
         !state.isViewingFromRecent &&
         !state.hasPreloadedAnalysis
       ) {
-        console.log('🚀 Starting auto-analysis check');
         try {
-          console.log('🔍 Checking if analysis should be skipped');
           const skipCheck = shouldSkipAutoAnalysis(
             state.isManualTrigger,
             state.isViewingFromRecent,
@@ -430,28 +340,18 @@ function App() {
           );
 
           if (skipCheck.shouldSkip) {
-            console.log('⏭️ Skipping auto-analysis:', skipCheck);
-            // Ensure all loading states are cleared when skipping
             setters.setIsAnalyzing(false);
             setters.setIsPageLoading(false);
             setters.setIsDetectingPage(false);
             return;
           }
           
-          console.log('🔄 Setting analysis triggered flag');
           refs.analysisTriggeredRef.current = true;
-          
-          console.log('📊 Starting article analysis');
           await handleAnalyzeArticle();
-          console.log('✅ Auto-analysis complete');
         } catch (error) {
-          console.error('❌ Auto-analysis failed:', error);
-          if (!mounted) {
-            console.log('❌ Component unmounted during auto-analysis');
-            return;
-          }
+          console.error('Auto-analysis failed:', error);
+          if (!mounted) return;
 
-          console.log('⚠️ Resetting auto-analysis state');
           const errorMessage = error instanceof Error ? error.message : 'Failed to analyze article. Please try again.';
           setters.setError(errorMessage);
           setters.setIsAnalyzing(false);
@@ -465,7 +365,6 @@ function App() {
     startAutoAnalysis();
 
     return () => {
-      console.log('🧹 Cleaning up auto-analysis effect');
       mounted = false;
     };
   }, [
@@ -484,22 +383,10 @@ function App() {
     setters.setIsDetectingPage,
   ]);
 
-  // Track loading state changes
-  useEffect(() => {
-    if (state.isPageLoading) {
-      console.log('📄 Page Loading State: Active - Waiting for webpage to load');
-    }
-    if (!state.isPageLoading && (state.isAnalyzing || state.isDetectingPage)) {
-      console.log('🔍 Analysis Loading State: Active - Reason:', {
-        isAnalyzing: state.isAnalyzing ? 'Analyzing content' : false,
-        isDetectingPage: state.isDetectingPage ? 'Preparing content' : false
-      });
-    }
-  }, [state.isPageLoading, state.isAnalyzing, state.isDetectingPage]);
 
   // Auto-expand sidebar when analysis results are available
   useEffect(() => {
-    const shouldExpand = shouldExpandSidebar(state.analysis.length, state.isAnalyzing, state.isViewingFromSimilar);
+    const shouldExpand = shouldExpandSidebar(state.analysis.length, state.isAnalyzing);
     
     if (shouldExpand) {
       // Trigger expansion by sending a message to content script
@@ -528,7 +415,7 @@ function App() {
         }
       });
     }
-  }, [state.analysis.length, state.isAnalyzing, state.isViewingFromSimilar]);
+  }, [state.analysis.length, state.isAnalyzing]);
 
 
 
@@ -581,16 +468,6 @@ function App() {
     }
   };
 
-  // Log state changes in development
-  if (process.env.NODE_ENV === 'development') {
-    console.log('🎨 State update:', {
-      isPageLoading: state.isPageLoading,
-      isAnalyzing: state.isAnalyzing,
-      isDetectingPage: state.isDetectingPage,
-      hasError: !!state.error,
-      analysisLength: state.analysis.length
-    });
-  }
 
   // Don't render anything until we're ready
   if (!isReady) {

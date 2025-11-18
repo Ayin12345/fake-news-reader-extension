@@ -16,14 +16,6 @@ export type TabState = {
 // In-memory tab state storage
 const tabStates = new Map<number, TabState>();
 
-// URL-based storage for better analysis persistence
-const urlAnalysisStorage = new Map<string, {
-  pageInfo: any;
-  analysis: any[];
-  failedProviders: string[];
-  timestamp: number;
-}>();
-
 // Track tabs that are currently being set up to prevent double execution
 const tabsBeingSetup = new Set<number>();
 
@@ -91,20 +83,6 @@ export async function deleteTabState(tabId: number): Promise<void> {
   }
 }
 
-// URL analysis storage helpers
-export function getUrlAnalysis(url: string) {
-  return urlAnalysisStorage.get(url);
-}
-
-export function setUrlAnalysis(url: string, data: {
-  pageInfo: any;
-  analysis: any[];
-  failedProviders: string[];
-  timestamp: number;
-}) {
-  urlAnalysisStorage.set(url, data);
-}
-
 // Tab setup tracking
 export function isTabBeingSetup(tabId: number): boolean {
   return tabsBeingSetup.has(tabId);
@@ -117,17 +95,6 @@ export function markTabAsBeingSetup(tabId: number): void {
 export function unmarkTabAsBeingSetup(tabId: number): void {
   tabsBeingSetup.delete(tabId);
 }
-
-// Cleanup old URL analysis entries (older than 24 hours)
-export const cleanupUrlStorage = (): void => {
-  const now = Date.now();
-  const maxAge = 24 * 60 * 60 * 1000; // 24 hours
-  for (const [url, data] of urlAnalysisStorage.entries()) {
-    if (now - data.timestamp > maxAge) {
-      urlAnalysisStorage.delete(url);
-    }
-  }
-};
 
 // Cleanup old tab states from storage (for closed tabs)
 export const cleanupTabStates = async (): Promise<void> => {
@@ -148,7 +115,6 @@ export const cleanupTabStates = async (): Promise<void> => {
     
     if (cleaned) {
       await chrome.storage.local.set({ tabStates: tabStatesObj });
-      console.log('Cleaned up old tab states');
     }
   } catch (error) {
     console.error('Error cleaning up tab states:', error);

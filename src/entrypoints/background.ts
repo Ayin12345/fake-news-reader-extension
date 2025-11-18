@@ -12,7 +12,6 @@ import {
 } from '../utils/messageHandlers'
 import { 
   deleteTabState, 
-  cleanupUrlStorage, 
   cleanupTabStates,
   unmarkTabAsBeingSetup
 } from '../utils/tabState'
@@ -23,9 +22,6 @@ export default defineBackground({
     chrome.runtime.onInstalled.addListener(() => {
       console.log('Extension installed')
     })
-    
-    // Cleanup URL storage every hour
-    setInterval(cleanupUrlStorage, 60 * 60 * 1000);
     
     // Cleanup tab states every 5 minutes
     setInterval(cleanupTabStates, 5 * 60 * 1000);
