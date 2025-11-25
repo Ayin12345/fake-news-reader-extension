@@ -98,7 +98,9 @@ async function fetchGeminiWithModel(content, apiKey, model) {
     logger.debug(`[Backend AI] Gemini ${model} request starting`);
     const startTime = Date.now();
     
-    // Prepare request body with grounding and JSON output configuration
+    // Prepare request body with grounding configuration
+    // Note: Cannot use responseMimeType: 'application/json' with grounding tools
+    // We'll parse JSON from text response instead
     const requestBody = {
       contents: [{
         parts: [{
@@ -107,9 +109,9 @@ async function fetchGeminiWithModel(content, apiKey, model) {
       }],
       generationConfig: {
         temperature: 0.7,
-        maxOutputTokens: 6000,
-        // Enforce JSON output mode to prevent citation markers in JSON
-        responseMimeType: 'application/json'
+        maxOutputTokens: 6000
+        // Removed responseMimeType: 'application/json' because it's incompatible with grounding tools
+        // JSON will be parsed from text response using existing parsing logic
       },
       // Enable Google Grounding Search for up-to-date information
       // This allows the model to search Google when its knowledge cutoff (Jan 2025) is insufficient
