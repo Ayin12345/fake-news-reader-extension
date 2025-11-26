@@ -260,10 +260,9 @@ async function fetchGeminiWithModel(content, apiKey, model) {
 }
 
 export async function fetchGemini(content, apiKey) {
-  // Primary: Gemini 2.5 Pro (best for complex analysis with grounding)
-  // Secondary: Gemini 2.5 Flash (faster alternative)
+  // Primary: Gemini 2.5 Flash (fast and efficient)
   // Backup: Gemini 2.5 Flash-Lite (lightweight fallback)
-  const models = ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+  const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
   let lastError = null;
   
   for (let i = 0; i < models.length; i++) {
