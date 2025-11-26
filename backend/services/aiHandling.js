@@ -14,7 +14,8 @@ export async function fetchOpenAI(content, apiKey) {
   }
 
   return retryOperation(async () => {
-    console.time('[Backend AI] OpenAI request');
+    const startTime = Date.now();
+    logger.info('[Backend AI] OpenAI request starting');
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -26,7 +27,8 @@ export async function fetchOpenAI(content, apiKey) {
         messages: [{ role: 'user', content }]
       })
     });
-    console.timeEnd('[Backend AI] OpenAI request');
+    const duration = Date.now() - startTime;
+    logger.info(`[Backend AI] OpenAI request completed in ${duration}ms`);
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
@@ -95,8 +97,8 @@ async function fetchGeminiWithModel(content, apiKey, model) {
   }
 
   return retryOperation(async () => {
-    logger.debug(`[Backend AI] Gemini ${model} request starting`);
     const startTime = Date.now();
+    logger.info(`[Backend AI] Gemini ${model} request starting`);
     
     // Prepare request body with grounding configuration
     // Note: Cannot use responseMimeType: 'application/json' with grounding tools
@@ -132,7 +134,7 @@ async function fetchGeminiWithModel(content, apiKey, model) {
     );
     
     const duration = Date.now() - startTime;
-    logger.debug(`[Backend AI] Gemini ${model} request completed in ${duration}ms`);
+    logger.info(`[Backend AI] Gemini ${model} request completed in ${duration}ms`);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -264,22 +266,34 @@ export async function fetchGemini(content, apiKey) {
   // Backup: Gemini 2.5 Flash-Lite (lightweight fallback)
   const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
   let lastError = null;
+  const overallStartTime = Date.now();
   
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
+    const modelStartTime = Date.now();
+    logger.info(`[Backend AI] Attempting Gemini ${model} (attempt ${i + 1}/${models.length})`);
+    
     try {
-      return await fetchGeminiWithModel(content, apiKey, model);
+      const result = await fetchGeminiWithModel(content, apiKey, model);
+      const modelDuration = Date.now() - modelStartTime;
+      const overallDuration = Date.now() - overallStartTime;
+      logger.info(`[Backend AI] Gemini ${model} succeeded in ${modelDuration}ms (total: ${overallDuration}ms)`);
+      return result;
     } catch (error) {
+      const modelDuration = Date.now() - modelStartTime;
       lastError = error;
+      logger.warn(`[Backend AI] Gemini ${model} failed after ${modelDuration}ms:`, error.message);
+      
       if (i < models.length - 1) {
         const nextModel = models[i + 1];
-        logger.warn(`[Backend AI] Gemini ${model} failed, trying ${nextModel}`);
+        logger.info(`[Backend AI] Switching to backup model: ${nextModel}`);
       }
       // Continue to next model
     }
   }
   
-  logger.error('[Backend AI] All Gemini models failed');
+  const overallDuration = Date.now() - overallStartTime;
+  logger.error(`[Backend AI] All Gemini models failed after ${overallDuration}ms`);
   // Re-throw the last error
   throw createAPIError(
     ErrorCode.GEMINI_ERROR,
@@ -287,7 +301,8 @@ export async function fetchGemini(content, apiKey) {
     { 
       originalError: lastError?.message,
       provider: 'Gemini',
-      modelsAttempted: models
+      modelsAttempted: models,
+      totalDurationMs: overallDuration
     },
     // Retryable if error is retryable
     isRetryableError(lastError)

@@ -6,7 +6,7 @@ export const OPENAI_PROMPT = `Analyze this news article for credibility. Return 
 
 {
   "credibility_score": (1-100),
-  "credibility_summary": "3-4 sentences showing strengths and concerns.",
+  "credibility_summary": "3-4 sentences showing strengths, weaknesses, and concerns. Include positives and negatives/speculations",
   "reasoning": "Multiple sentences with specific evidence.",
   "evidence_sentences": [
     { "quote": "exact quote from article", "impact": "why this affects credibility" }
