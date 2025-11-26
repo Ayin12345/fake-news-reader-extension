@@ -27,7 +27,7 @@ CRITICAL RULES:
 1. SENTENCES: Every sentence must:
    - Start with a capital letter
    - Have proper spaces between all words
-   - End with exactly one period
+   - End with EXACTLY ONE PERIOD
    - Never end with a comma
 2. QUOTES:
    - Return 3-6 distinct evidence items in evidence_sentences
