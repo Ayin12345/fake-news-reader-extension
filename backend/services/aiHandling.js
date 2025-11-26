@@ -262,9 +262,9 @@ async function fetchGeminiWithModel(content, apiKey, model) {
 }
 
 export async function fetchGemini(content, apiKey) {
-  // Primary: Gemini 2.5 Flash-Lite (lightweight and fast)
-  // Backup: Gemini 2.5 Flash (fallback option)
-  const models = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+  // Primary: Gemini 2.5 Flash (better quality, worth the extra ~5 seconds)
+  // Backup: Gemini 2.5 Flash-Lite (lightweight fallback)
+  const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
   let lastError = null;
   const overallStartTime = Date.now();
   
