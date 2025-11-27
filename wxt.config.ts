@@ -5,6 +5,10 @@ export default defineConfig({
   srcDir: 'src',
   manifest: {
     name: "NewsScan",
+    // Privacy policy URL - REQUIRED for Chrome Web Store submission
+    // Update this URL after hosting your privacy policy
+    // GitHub Pages option: https://ayin12345.github.io/fake-news-reader-extension/privacy-policy.html
+    privacy_policy: "https://ayin12345.github.io/fake-news-reader-extension/privacy-policy.html",
     permissions: [
       "storage",
       "scripting",
