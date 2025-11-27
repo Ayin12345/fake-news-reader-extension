@@ -40,7 +40,7 @@ export const GEMINI_PROMPT = `Analyze this news article for credibility. Return 
 
 {
   "credibility_score": (1-100),
-  "credibility_summary": "3-4 sentences showing strengths and concerns.",
+  "credibility_summary": "3-4 sentences showing strengths and concerns. Include positives and negatives/speculations.",
   "reasoning": "Multiple sentences with specific evidence.",
   "evidence_sentences": [
     { "quote": "exact quote from article", "impact": "why this affects credibility" }
@@ -72,7 +72,7 @@ CRITICAL RULES:
 1. SENTENCES: Every sentence must:
    - Start with a capital letter
    - Have proper spaces between all words
-   - End with exactly one period
+   - End with EXACTLY one period
    - Never end with a comma
 2. QUOTES:
    - Return 3-6 distinct evidence items in evidence_sentences
