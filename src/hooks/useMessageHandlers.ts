@@ -29,17 +29,8 @@ export function useMessageHandlers({ state, refs, setters }: MessageHandlerProps
   // Listen for preloaded analysis from content script
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      console.log('📨 Sidepanel received message:', event.data?.type, event.data);
-      
       if (event.data?.type === 'PRELOADED_ANALYSIS') {
-        console.log('🎯 PRELOADED_ANALYSIS message received in sidepanel!');
         const analysisData = event.data.data;
-        console.log('📄 Analysis data:', {
-          hasPageInfo: !!analysisData.pageInfo,
-          hasAnalysis: !!analysisData.analysis,
-          analysisLength: analysisData.analysis?.length || 0,
-          isViewingFromRecent: analysisData.isViewingFromRecent
-        });
         
         // Set the analysis data directly without going through loading state
         // Clear any loading flags first to avoid infinite spinner when opening from history
@@ -60,17 +51,13 @@ export function useMessageHandlers({ state, refs, setters }: MessageHandlerProps
         
         // Reset the analysis trigger ref to prevent auto-analysis
         refs.analysisTriggeredRef.current = true;
-        console.log('✅ Preloaded analysis state set successfully');
       } else if (event.data?.type === 'TRIGGER_NEW_ANALYSIS') {
-        console.log('🚨 TRIGGER_NEW_ANALYSIS message received');
         
         // Check if we already have preloaded analysis - if so, ignore this trigger
         if (state.hasPreloadedAnalysis || state.isViewingFromRecent) {
-          console.log('🛡️ IGNORING TRIGGER_NEW_ANALYSIS because we have preloaded analysis or are viewing from recent');
           return;
         }
         
-        console.log('🚨 TRIGGER_NEW_ANALYSIS will override preloaded analysis!');
         setters.setIsManualTrigger(true);
         // Reset state for new analysis
         setters.setError('');
